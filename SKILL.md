@@ -369,19 +369,38 @@ node $S webpack "DialogButton"                 # find obfuscated class names
 
 These apply when injecting CSS into the `Steam Big Picture Mode` window:
 
-**`outline` and `box-shadow: inset` are invisible on full-viewport elements.**
-`body`, `#popup_target`, and any div sized to the full 1280×800 viewport will not show an outline or inset shadow even when computed styles confirm the property is applied. CEF does not render outlines on elements whose border box fills the entire viewport.
-- Fix: target a specific child element instead (e.g. `#header`, `#Main`, `.PageListColumn`).
+**`outline` can be invisible on full-viewport elements.**
+CEF does not render outlines on elements whose border box fills the entire viewport.
+- Fix: use `box-shadow: inset 0 0 0 3px <color>` instead (see below).
+
+**`box-shadow: inset` is invisible on full-viewport `display: flex` containers.**
+Inset shadows work on full-viewport block elements, but on flex containers the flex children (which have opaque backgrounds) are painted on top of the parent's background layer, hiding the shadow. `outline` has the same problem. Changing `display: flex` → `display: block` makes the shadow visible but breaks layout.
+- Fix: target the direct children instead of the flex container using a child selector: `parent > child { box-shadow: inset 0 0 0 3px <color> }`. If the children are block elements the shadow should be visible on them.
+
+**⚠️ Do not use `::after { position: fixed; pointer-events: none }` as a workaround.**
+Even though `pointer-events: none` prevents mouse events, Steam's gamepad input routing does NOT respect it. A `position: fixed` overlay will block gamepad scrolling on the targeted page even when the element appears inert.
+
+**Decision tree for injecting a visible highlight:**
+
+```
+Is the element display: flex AND full-viewport (1280×800)?
+  YES → target its children: selector > .Panel { box-shadow: inset 0 0 0 3px color }
+  NO  → use box-shadow: inset 0 0 0 3px color on the element directly
+         (outline also works if the element is not full-viewport)
+```
+
+**Diagnosing highlight not showing — quick checklist:**
+1. `node $S styles "<selector>"` → check `rect`. If `width: 1280, height: 800` it's full-viewport → `outline` won't work.
+2. Check `display`. If `flex` + full-viewport → `box-shadow: inset` also won't work on the element itself.
+3. Temporarily change `display` to `block` to confirm: if shadow appears, flex children are covering it.
+4. Fix: use `selector > .Panel` to target children instead of the flex root.
 
 **`filter` on BPM `body` makes QAM and MainMenu browser-view popups invisible.**
 CSS `filter` promotes `body` to its own GPU compositing layer. In CEF, this layer renders on top of the browser-view popup windows (QuickAccess, MainMenu), hiding them completely. Users also lose access to Settings dialogs since fixed-position overlays break under a filtered body.
 - **Never use `filter`, `transform`, `will-change`, or `opacity < 1` on BPM `body` or any full-viewport ancestor** if you want popups to remain visible.
-- Safe alternatives that don't create compositing layers: `outline`, `font-family`, `color`, `background-color` on a non-root element.
+- Safe alternatives: `::after` overlay (above), `font-family`, `color`, `background-color`.
 
-**Settings dialog elements require targeting child elements, not the dialog root.**
-The Settings dialog root (`.DialogContent_InnerWidth:has(.PageListColumn)`) is 1280×800 and fills the viewport — the same outline-invisibility problem applies. Target `.PageListColumn` (256×800 left nav) and `.DialogContentTransition` (1024×800 right panel) instead.
-
-**background-color on child elements IS visible** even when outlines on the same element are not.
+**`background-color` is visible even on full-viewport flex containers** (painted before children, not covered by them).
 
 ### Browser-view popup windows — always loaded
 
