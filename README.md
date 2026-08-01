@@ -1,263 +1,354 @@
 # steam-debug
 
-A **Claude skill** for debugging the running **Steam Desktop App** via Chrome DevTools Protocol (CDP). It gives Claude the ability to inspect, evaluate, and manipulate the Steam UI at runtime — reading React component trees, searching webpack modules, checking CSS, navigating between pages, and streaming live logs — without any manual browser DevTools setup.
+A **Claude skill** and standalone CLI for inspecting, debugging, and injecting code into a
+running **Steam client** — desktop or Steam Deck — via the Chrome DevTools Protocol (CDP).
 
-Steam is built on Chromium Embedded Framework (CEF). With debug flags enabled it exposes the same WebSocket protocol as browser DevTools. The bundled `steam-debug.mjs` script wraps that protocol into a set of focused CLI commands that Claude invokes on your behalf.
+Steam's UI is a Chromium Embedded Framework (CEF) app. Launched with debug flags it exposes the
+same protocol browser DevTools uses, so the entire Steam UI can be inspected and modified at
+runtime like a web page. `steam-debug.mjs` wraps that protocol into focused commands — read React
+state, search webpack modules, resolve minified class names, inspect computed CSS, drive
+navigation, stream logs, and inject custom CSS/JS.
 
-The CLI can also be used directly from a terminal for one-off queries or scripting.
+Built for plugin, theme, and integration development against Steam's UI.
 
-Works on macOS, Linux, Windows, and Steam Deck.
+**Works on desktop and Steam Deck.** Same commands for both — a desktop client on macOS, Linux or
+Windows, and a Deck over the network via `--host`. Both are exercised by the test suite, and any
+command can run against both at once. See [reference/remote.md](reference/remote.md).
+
+**Scope.** This is a debugging and development tool. Injection is per-session and disappears on
+reload, by design — it exists so you can try a change and see what happens.
+
+Out of scope: making a change persist or load on startup, packaging or distributing plugins, and
+anything that runs unattended inside someone's client. That belongs in a plugin loader. The
+boundary is simple — this helps you find out what is going on and try a change; making a change
+stick is someone else's job.
 
 ---
 
 ## Using with Claude
 
-Install the skill by placing this directory under `~/.claude/skills/steam-debug/`. Claude Code picks it up automatically via `SKILL.md`.
+Place this directory at `~/.claude/skills/steam-debug/`. Claude Code discovers it via `SKILL.md`.
 
-Once installed, describe your Steam debugging task in plain language and Claude will choose the right commands, interpret the output, and guide you through the investigation:
+Describe the task in plain language; Claude selects the commands, interprets output, and follows
+the operating procedure in `SKILL.md`:
 
-> *"Why is the Quick Access Menu not rendering correctly?"*
-> *"What React version is Steam using?"*
+> *"Why is my injected CSS not showing up in Big Picture Mode?"*
 > *"Find the webpack module that defines the DialogButton component."*
-> *"Navigate to the downloads page and show me the current route."*
+> *"Make the Quick Access Menu background darker."*
+> *"Something is throwing a React error on the downloads page — find it."*
 
-Claude uses `steam-debug.mjs` as its tool and `SKILL.md` as its reference guide. You do not need to know the commands — though they are documented below if you want to run them directly.
+`SKILL.md` is a strict SOP rather than a tutorial: it gates work behind a preflight check, fixes
+which commands may be used, and defines how to verify a result before reporting it — because the
+easiest mistake here is a confident answer drawn from the wrong window, a stale route, or a style
+that computed but never painted.
 
 ---
 
 ## Requirements
 
-- **Node.js 22+** — uses built-in `WebSocket` and `fetch` (no npm install)
-- **Steam** — launched with `-cef-enable-debugging` (see below)
-- **Chrome** — for the DevTools UI (`chrome://inspect`), not required for the CLI or Claude
+- **Node.js 22+** — uses built-in `WebSocket` and `fetch`, no dependencies
+- **A Steam client with CDP enabled** — either:
+  - desktop, launched with `-cef-enable-debugging` (see below), or
+  - a Steam Deck with Settings → System → Developer → **CEF Remote Debugging**, reachable on
+    your network. Address it with `--host`; SteamOS serves CDP on port 8081.
+- **Chrome** — optional, only for the interactive DevTools UI
 
 ---
 
-## Launch Steam in Debug Mode
+## Launch Steam in debug mode
 
-Kill any running Steam instance first — a running instance silently ignores new launch flags.
+Launch flags are read **only at startup**. A already-running instance silently ignores them, so
+it must be closed first — note that this drops in-progress downloads and running games.
 
 ```bash
 # macOS
 pkill -f Steam
-
 # Linux
 pkill steam
-
 # Windows
 taskkill /IM steam.exe /F
 ```
 
-Then launch with debug flags:
-
 | Platform | Command |
-|----------|---------|
+|---|---|
 | macOS | `open -a Steam --args -dev -windowed -cef-enable-debugging -gamepadui` |
 | Linux | `steam -dev -windowed -cef-enable-debugging -gamepadui` |
 | Windows | `steam.exe -dev -windowed -cef-enable-debugging -gamepadui` |
 | Steam Deck | Settings → System → Developer → CEF Remote Debugging |
 
-**What each flag does:**
-
 | Flag | Effect |
-|------|--------|
+|---|---|
+| `-cef-enable-debugging` | **Required.** Opens CDP on port 8080 (8081 on Steam Deck) |
 | `-dev` | Developer mode — relaxed security, verbose logging |
-| `-windowed` | Run as a window instead of fullscreen |
-| `-cef-enable-debugging` | Exposes CDP on port 8080 |
-| `-gamepadui` | Forces Big Picture Mode (similar to SteamOS UI on Steam Deck) |
+| `-windowed` | Run windowed instead of fullscreen |
+| `-gamepadui` | Big Picture Mode. Required for `page`, `menu`, and `stores` |
 
-Omit `-gamepadui` when debugging the regular desktop Steam UI.
+Omit `-gamepadui` to debug the classic desktop UI, which is a different front end.
 
-**Verify it's working:**
 ```bash
-curl http://localhost:8080/json/version
-# → {"Browser": "Chrome/...", ...}
+curl http://localhost:8080/json/version   # {"Browser": "Chrome/...", ...}
 ```
+
+Steam takes 30–90 seconds to fully initialise. Poll `status` until both marks are `✓`.
 
 ---
 
 ## Usage
 
 ```bash
-# Shorthand alias (optional)
 S=~/.claude/skills/steam-debug/steam-debug.mjs
 
-node $S <command> [options]
+node $S status
 node $S help
 ```
 
----
-
-## Commands
-
 | Command | Description |
-|---------|-------------|
-| `status` | CDP endpoint, target count, webpack module count, Steam init state |
-| `targets` | All CDP targets with title, URL, and WebSocket URL |
-| `eval <expr>` | Evaluate a JS expression; promises auto-awaited; objects returned as JSON |
-| `errors` | Install a `console.error` capture shim + print captured calls |
-| `logs` | Stream live `console.*` + network/security events until Ctrl+C |
-| `react` | React version, webpack module ID, fiber tree stats |
-| `styles <selector>` | Tag, class, layout rect, computed styles, resolved CSS custom properties |
-| `webpack <pattern>` | Search all webpack module sources for a string |
-| `module <id>` | Dump full source of a webpack module by numeric ID |
-| `navigate <page>` | Navigate Big Picture Mode to a named page |
-| `page` | Current BPM route, recent history, open menu state |
-| `menu <name>` | Open or close the Quick Access Menu or Main Menu overlay |
-| `popups` | List all popup windows tracked by `g_PopupManager` |
-| `stores` | Inspect `window.SteamUIStore` sub-store names and their properties |
+|---|---|
+| `status` | CDP endpoint, target count, webpack module count, init state |
+| `doctor` | Diagnose the whole setup and print the remedy for whatever is wrong |
+| `targets` | All CDP targets with title, URL, WebSocket URL |
+| `eval <expr>` | Evaluate JS; promises awaited; objects returned as JSON |
+| `errors` | Install a `console.error` capture shim, print what it caught |
+| `logs` | Stream live console + network/security events until Ctrl+C |
+| `react` | React version, module ID, fiber tree stats |
+| `styles <selector>` | Computed styles, layout rect, resolved CSS custom properties |
+| `dom <selector>` | Dump an element subtree — structure, sizes, leaf text |
+| `webpack <pattern>` | Search every webpack module's source |
+| `classes <pattern>` | Resolve minified CSS-module class names by readable name |
+| `module <id>` | Dump a webpack module's full source |
+| `navigate <page>` | Drive Big Picture Mode to a page |
+| `page` | Current route and open menu |
+| `menu <name>` | Open or close Quick Access / Main Menu |
+| `popups` | Popup windows tracked by `g_PopupManager` |
+| `stores` | `window.SteamUIStore` sub-stores and properties |
+| `screenshot [selector]` | Capture what is actually painted, as a PNG |
+| `inject css\|js <file>` | Inject a stylesheet or script, namespaced and reversible |
+| `inject list` / `inject remove <slug>` | List or undo injections |
+| `watch css\|js <file>` | Re-inject on every file change until Ctrl+C |
 
----
+| Option | Applies to | Default |
+|---|---|---|
+| `--target <name>` | `eval`, `errors`, `logs`, `styles`, `dom`, `module`, `screenshot`, `inject`, `watch` | `SharedJSContext` |
+| `--port <n>` | all | tries 8080, 8081, then 9222 |
+| `--host <addr>` | all | `localhost` — comma-separate for several devices |
+| `--timeout <ms>` | all | `10000` |
+| `--json` | all | off |
+| `--level <all\|warn\|error>` | `logs` | `all` |
+| `--source <all\|console\|browser>` | `logs` | `all` |
+| `--grep <regex>` | `logs` | — |
+| `--limit <n>` | `webpack`, `classes` | `10` / `20` |
+| `--ignore-case` | `webpack`, `classes` | off |
+| `--depth <n>` | `dom` | `2` |
+| `--out <path>` | `screenshot` | derived from target title |
+| `--diff <path>` | `screenshot` | — |
+| `--settle` | `screenshot` | off |
+| `--file <path>` | `eval` | — |
+| `--id <slug>` | `inject`, `watch` | derived from filename |
 
-## Options
+**`--json` works on every command** and guarantees machine-readable stdout, so nothing has to be
+parsed out of prose. `logs --json` emits one JSON object per line.
 
-| Option | Commands | Description |
-|--------|----------|-------------|
-| `--target <name>` | `eval`, `errors`, `logs`, `styles`, `module` | Named target window (see [Targets](#targets) below) or any title substring. Default: `SharedJSContext` |
-| `--port <n>` | All | Override CDP port. Default: tries 8080 then 9222 |
-| `--level all\|warn\|error` | `logs` | Filter log level. Default: `all` |
-| `--limit <n>` | `webpack` | Max number of matches to return. Default: `10` |
-| `--ignore-case` | `webpack` | Case-insensitive pattern matching |
+**`--host` takes a list**, so any command can run against a desktop client and a Steam Deck
+together — the practical way to check a plugin behaves the same on both:
+
+```bash
+node $S page --host localhost,steamdeck
+node $S inject css theme.css --host localhost,steamdeck --target BigPicture
+node $S logs --host localhost,steamdeck --level error   # concurrent, tagged per device
+```
+
+Output is labelled per device, `--json` aggregates into `{ devices: [...] }`, `--out` is suffixed
+so captures do not overwrite, and the exit code is 0 only if every device succeeded. Full
+semantics in [reference/commands.md](reference/commands.md).
+
+Full semantics in [reference/commands.md](reference/commands.md).
 
 ---
 
 ## Targets
 
-Steam runs multiple CEF renderer processes. Each is a separate CDP target — like separate browser tabs.
+Steam runs several CEF renderers. Each is a separate CDP target — effectively separate browser
+tabs that cannot see each other's JavaScript.
 
-| Name | Matches | Has webpack | Use for |
-|------|---------|-------------|---------|
-| `SharedJSContext` | `steamloopback.host/routes/` | ✓ | All JS, webpack, React — **start here** |
-| `BigPicture` | `Steam Big Picture Mode` | ✓ | Gamepad UI layout and navigation |
-| `QuickAccess` | `QuickAccess_uid*` | ✗ | Quick Access Menu HTML/CSS |
-| `MainMenu` | `MainMenu_uid*` | ✗ | Main Menu HTML/CSS |
-| `NotificationToasts` | `notificationtoasts_uid*` | ✗ | Toast notification HTML/CSS |
-| `Store` | title includes "store" | ✓ | Steam Store page |
+| Name | webpack | `SteamUIStore` | Use for |
+|---|---|---|---|
+| `SharedJSContext` | **yes** | **yes** | All JS, webpack, React, stores — start here |
+| `BigPicture` | no | no | Big Picture DOM and CSS |
+| `QuickAccess` | no | no | Quick Access Menu DOM and CSS |
+| `MainMenu` | no | no | Main Menu DOM and CSS |
+| `NotificationToasts` | no | no | Toast DOM and CSS |
 
-`QuickAccess`, `MainMenu`, and `NotificationToasts` are **always loaded** from startup — they persist even when the overlay is closed. You can inspect them at any time without opening them first.
+**Only `SharedJSContext` has webpack and `SteamUIStore`** — the others return `undefined` for
+both, so run logic there and use the rest for DOM/CSS only. A `Store` alias also exists but
+resolves only while a store window is open.
+
+The popup windows are loaded from startup and persist for the whole session, so their DOM can be
+inspected without opening them. Their *layout*, though, may not exist until the menu has been
+shown once — measured directly on a Steam Deck. `NotificationToasts` is created lazily and may
+not exist yet on either platform. On a Deck the viewport is 854×534 at 1.5× rather than 1280×800
+at 2×. Details in
+[reference/targets.md](reference/targets.md) and [reference/remote.md](reference/remote.md).
 
 ---
 
-## Examples
+## Exit codes
+
+| Code | Meaning |
+|---|---|
+| `0` | The requested data was produced |
+| `1` | Failed, or found nothing — not found, no matches, no route change |
+| `2` | Wrong invocation — unknown command, missing argument, invalid flag value |
+
+An empty result is exit 1, so "searched and found nothing" never reads as success. Commands
+returning JSON still print `{"error": …}` on stdout when they fail, so the payload stays
+parseable alongside the status code.
+
+Invalid input is rejected rather than ignored — a flag the command does not act on, an
+unrecognised `--level`, a non-numeric `--limit`, or a flag with no value all exit 2 with an
+explanatory message. `navigate` and `menu` both verify their own result and exit 1 if the state
+did not actually change, so a no-op cannot be mistaken for success.
+
+## Verifying a visual change
+
+**A computed style is not proof of a visible change.** CEF drops some paints entirely, so
+`styles` can report exactly the value you asked for while the screen is unchanged. `screenshot`
+captures what the compositor actually drew, and `--diff` turns "nothing happened" into an exit
+code:
 
 ```bash
-# Check if Steam is ready
-node $S status
-
-# List all open CEF windows
-node $S targets
-
-# Run arbitrary JS in SharedJSContext
-node $S eval "window.App?.BFinishedInitStageOne()"
-node $S eval "({ version: window.webpackChunksteamui?.length })"
-
-# Stream errors only
-node $S logs --level error
-
-# Navigate Big Picture Mode
-node $S navigate library
-node $S navigate downloads
-node $S navigate steam://open/friends
-
-# Check current page and open menu
-node $S page
-
-# Open/close Quick Access Menu
-node $S menu QuickAccess
-node $S menu Close
-
-# Open Main Menu overlay on the QuickAccess target
-node $S styles "body" --target QuickAccess
-
-# Find a component in the webpack bundle
-node $S webpack "DialogButton"
-node $S webpack "dialogbutton" --ignore-case
-node $S webpack "useState" --limit 3
-
-# Dump the React module source (get ID from react command)
-node $S react
-node $S module <moduleId>
-
-# Inspect Steam's MobX store tree
-node $S stores
-
-# Two-phase error capture
-node $S errors            # installs shim
-# ... reproduce the bug ...
-node $S errors            # prints what was captured
-
-# Reset error buffer
-node $S eval "window.__steam_debug_errors = []"
-
-# Inspect computed styles + CSS custom properties on an element
-node $S styles ".SomeComponent"
-node $S styles "#QuickAccess-Menu" --target QuickAccess
+node $S screenshot --target BigPicture --out before.png --settle
+node $S inject css theme.css --target BigPicture
+node $S screenshot --target BigPicture --out after.png --settle --diff before.png
+# Changed: 20312 of 4096000 px (0.4959%), bounding box 265x104 at 66,732
 ```
+
+`--diff` exits 1 when the images are identical. The bounding box localises the change, which is a
+fast way to confirm you affected the element you meant to.
+
+Pass `--settle` on both captures. Big Picture keeps repainting for seconds after a route change —
+it loads hero artwork progressively — so an unsettled baseline registers that animation as your
+change.
+
+The usual cause of an invisible change is Steam's `.BasicUI` layer — an opaque, full-viewport
+element that covers anything painted on `body` or any ancestor above it. Style the leaf element
+that owns the pixels instead. Details in [reference/injection.md](reference/injection.md).
+
+`screenshot` cannot capture `QuickAccess`, `MainMenu`, or `NotificationToasts` — they are
+composited outside the page tree and CDP capture hangs on them.
+
+The usual cause is Steam's `.BasicUI` layer covering anything painted on `body` — style the leaf
+element that owns the pixels instead.
 
 ---
 
-## CDP Targets — Browser DevTools
+## Injecting code
 
-To use the full Chrome DevTools UI (Elements, Sources, Network):
-
-```
-chrome://inspect → Configure → localhost:8080 → Inspect
-```
-
-Use **Chrome** specifically — Firefox DevTools does not speak CDP.
-
----
-
-## Remote Debugging — Steam Deck
-
-Enable on device: **Settings → System → Developer → CEF Remote Debugging**
+Write the CSS or JS to a file and let `inject` handle namespacing and reversal:
 
 ```bash
-# SSH tunnel — lets you use the script normally
-ssh -L 8080:localhost:8080 deck@steamdeck
-
-# Then in a separate terminal:
-node $S status
+node $S inject css theme.css --target BigPicture    # id defaults to the filename: "theme"
+node $S inject list          --target BigPicture
+node $S inject remove theme  --target BigPicture
 ```
+
+Every artifact gets a `steam-debug-<slug>` id and is registered so it can be listed and undone.
+Injection is remove-then-add, so re-running never accumulates duplicates. A JS file should
+`return` a teardown function — `inject` stores it and calls it on removal.
+
+While iterating, `watch` re-injects on every save until you stop it:
+
+```bash
+node $S watch css theme.css --target BigPicture
+```
+
+Injections live in page memory and are **lost on reload or restart**.
+
+Steam's class names are minified per build and must be re-resolved every time — use `classes` to
+look one up rather than reusing it from notes. Full playbook in
+[reference/injection.md](reference/injection.md).
+
+---
+
+## Documentation
+
+| File | Contents |
+|---|---|
+| [SKILL.md](SKILL.md) | Operating procedure — guardrails, phases, command contract |
+| [reference/commands.md](reference/commands.md) | Per-command semantics and output shapes |
+| [reference/targets.md](reference/targets.md) | Windows, popups, routes, navigation |
+| [reference/injection.md](reference/injection.md) | CSS/JS injection, CEF paint traps, plugin patterns |
+| [reference/troubleshooting.md](reference/troubleshooting.md) | Log sources, error tables, React decoding |
+| [reference/remote.md](reference/remote.md) | Steam Deck / SteamOS — verified on hardware |
+| [reference/launch-options.md](reference/launch-options.md) | Full Steam command-line reference — optional, rarely needed |
 
 ---
 
 ## Testing
 
-The smoke test suite auto-launches Steam in debug mode if it is not already running.
-
 ```bash
-node --test test/smoke.mjs
+node --test test/skill-lint.mjs            # offline: docs vs implementation
+node --test test/smoke.mjs                 # live, desktop
+node test/run-devices.mjs desktop deck     # live, both devices in sequence
 ```
 
-If Steam is running **without** `-cef-enable-debugging`, kill it first:
+`skill-lint.mjs` needs neither Steam nor a network. It fails when documentation drifts from code —
+a command or flag named in the docs that does not exist, a stale `--target` column in `SKILL.md`,
+an implemented command that is undocumented, `help` or this README missing a command, or a broken
+reference link.
+
+`smoke.mjs` exercises the whole command surface against a real client: reachability, `eval`,
+`navigate`/`page` and `menu`/`page` round-trips, every named target alias, `screenshot` with
+`--diff` and `--settle`, the full `inject` lifecycle including teardown, `watch` hot-reload,
+`doctor`, `dom`, `classes`, log filtering, and the usage/failure exit codes.
+
+### Choosing the device
+
+| | Desktop | Steam Deck |
+|---|---|---|
+| Select with | *(default)* | `STEAM_DEBUG_DEVICE=deck` |
+| Connection | localhost, default ports | `STEAM_DECK_HOST` (default `steamdeck`) port 8081 |
+| Steam auto-launched | yes | **never** |
+
+Every command in the suite gets the device's `--host`/`--port` automatically, so the same tests
+validate both. Two assertions are device-aware: `NotificationToasts` must resolve on desktop and
+must be absent on a Deck.
 
 ```bash
-# macOS
-pkill -f steam_osx
-
-# Linux
-pkill steam
+STEAM_DEBUG_DEVICE=deck node --test test/smoke.mjs
+STEAM_DECK_HOST=192.168.1.42 node test/run-devices.mjs deck
 ```
 
-The suite covers: CDP reachability, `eval`, `navigate`+`page` round-trip, `menu`+`page` round-trip, all named target enum names, `react`, `styles`, `popups`, `targets`, `webpack` (with `--limit` and `--ignore-case`), `module`, `errors` (shim install + reset), and `stores`.
+On desktop, Steam is launched with debug flags if it is not already running; if it is running
+*without* `-cef-enable-debugging`, kill it first (`pkill -f steam_osx` on macOS, `pkill steam` on
+Linux).
+
+A Deck is **never** launched or restarted by the suite — enable
+Settings → System → Developer → CEF Remote Debugging first. Note the suite navigates, opens menus
+and injects CSS, so expect to see it working on the device. It cleans up after itself.
 
 ---
 
-## How It Works
+## How it works
 
-Steam's CEF runtime exposes a standard Chrome DevTools Protocol WebSocket endpoint on port 8080. `steam-debug.mjs` connects to this endpoint, sends `Runtime.evaluate` commands, and parses the results — the same protocol Chrome DevTools uses internally. The script uses only Node.js 22+ built-ins (`WebSocket`, `fetch`) with no external dependencies.
+Steam's CEF runtime exposes a CDP WebSocket on port 8080, or 8081 on a Steam Deck. `steam-debug.mjs` connects, issues
+`Runtime.evaluate` and related commands, and formats the results — the same protocol Chrome
+DevTools speaks. Node 22+ built-ins only.
 
-Key globals available in `SharedJSContext`:
+Globals available in `SharedJSContext`:
 
 ```js
-window.webpackChunksteamui          // Steam's webpack chunk array
-window.App?.BFinishedInitStageOne() // true once Steam is fully initialised
-window.SteamUIStore                 // MobX store tree (navigation, menus, windows)
-window.SteamClient                  // Native Steam client API
-window.g_PopupManager               // Popup window registry
-window.__steam_debug_wr             // Cached webpack require (set by this tool)
+window.webpackChunksteamui          // webpack chunk array — presence means the bundle loaded
+window.App?.BFinishedInitStageOne() // true once Steam has finished initialising
+window.SteamUIStore                 // MobX state: navigation, menus, windows
+window.SteamClient                  // native client API bridge
+window.g_PopupManager               // popup window registry
+window.__steam_debug_wr             // cached webpack require — set by this tool
 ```
+
+`window.React` does not exist; React lives inside the bundle. Use `react` to find its module ID.
+
+The tool leaves `window.__steam_debug_wr` behind on most commands, and `errors` permanently wraps
+`console.error`. Both clear on reload.
 
 ---
 
