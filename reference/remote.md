@@ -109,6 +109,30 @@ Verified directly on the device: `status`, `doctor`, `targets`, `page`, `stores`
 `menu`. Route names match desktop, and `navigate account` is the same no-op, correctly reported
 as `Route unchanged`.
 
+### Backend logs and restart
+
+`logs --source backend` and `console` go through `SteamClient`, which the Deck has like any other
+client — so Steam's own log stream is readable over the network with **no SSH, no password, and
+nothing installed on the device**. This is the one capability a Deck otherwise lacks entirely: on
+a desktop you could launch Steam from a terminal to see the same output, and in Game Mode you
+cannot.
+
+```bash
+node $S logs --source backend --host steamdeck --level error
+node $S console app_status 570 --host steamdeck
+```
+
+`restart js --confirm` works remotely and is the right recovery step for a wedged UI.
+
+**`restart client` is refused over `--host`.** Relaunching Steam means starting a process on that
+machine, and Steam's own restart drops the debugging flag, so the client would come back
+unreachable with no way to fix it remotely. If a Deck's client needs a full restart, the user has
+to do it on the device.
+
+> Both commands were verified on desktop. They have not yet been run against a Deck — the device
+> was unavailable when this was written. Confirm before treating Deck behaviour as established
+> (SKILL.md §9 check 11).
+
 ---
 
 ## Developing for a Deck on a desktop

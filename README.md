@@ -109,7 +109,9 @@ node $S help
 | `targets` | All CDP targets with title, URL, WebSocket URL |
 | `eval <expr>` | Evaluate JS; promises awaited; objects returned as JSON |
 | `errors` | Install a `console.error` capture shim, print what it caught |
-| `logs` | Stream live console + network/security events until Ctrl+C |
+| `logs` | Stream live console, browser and Steam-backend output until Ctrl+C |
+| `console <cmd>` / `console list` | Run a Steam developer-console command, or list what exists |
+| `restart <js\|client>` | Restart the UI or the whole client, and wait for it to come back |
 | `react` | React version, module ID, fiber tree stats |
 | `styles <selector>` | Computed styles, layout rect, resolved CSS custom properties |
 | `dom <selector>` | Dump an element subtree — structure, sizes, leaf text |
@@ -134,16 +136,17 @@ node $S help
 | `--timeout <ms>` | all | `10000` |
 | `--json` | all | off |
 | `--level <all\|warn\|error>` | `logs` | `all` |
-| `--source <all\|console\|browser>` | `logs` | `all` |
+| `--source <all\|console\|browser\|backend>` | `logs` | `all` |
 | `--grep <regex>` | `logs` | — |
-| `--limit <n>` | `webpack`, `classes` | `10` / `20` |
-| `--ignore-case` | `webpack`, `classes` | off |
+| `--limit <n>` | `webpack`, `classes`, `console list` | `10` / `20` |
+| `--ignore-case` | `webpack`, `classes`, `console list` | off |
 | `--depth <n>` | `dom` | `2` |
 | `--out <path>` | `screenshot` | derived from target title |
 | `--diff <path>` | `screenshot` | — |
 | `--settle` | `screenshot` | off |
 | `--file <path>` | `eval` | — |
 | `--id <slug>` | `inject`, `watch` | derived from filename |
+| `--confirm` | `restart`, `console` | off |
 
 **`--json` works on every command** and guarantees machine-readable stdout, so nothing has to be
 parsed out of prose. `logs --json` emits one JSON object per line.
@@ -158,8 +161,56 @@ node $S logs --host localhost,steamdeck --level error   # concurrent, tagged per
 ```
 
 Output is labelled per device, `--json` aggregates into `{ devices: [...] }`, `--out` is suffixed
-so captures do not overwrite, and the exit code is 0 only if every device succeeded. Full
-semantics in [reference/commands.md](reference/commands.md).
+so captures do not overwrite, and the exit code is 0 only if every device succeeded.
+
+---
+
+## Reading Steam's own logs
+
+Three streams, not one. `logs` reads all of them and tags each line with where it came from:
+
+```
+[ERROR] Uncaught TypeError: …                  console — page JavaScript
+[ERROR] (theme.css) Failed to load resource    browser — CEF
+[ERROR] (backend) RaiseJSException: …          backend — Steam itself
+```
+
+The backend stream is Steam's own output — the same thing a terminal launch shows with `-dev` —
+delivered over CDP through `SteamClient.Console`. **No terminal launch, no SSH, nothing installed,
+and it works the same on a Steam Deck over `--host`.**
+
+It matters because it is the only stream that names the Steam component behind a failure. A
+`SteamClient` call made with the wrong arguments returns cleanly to JavaScript and is refused in
+the backend, so without it the symptom is "my code ran and nothing happened":
+
+```bash
+node $S logs --source backend --level error
+node $S console list 'log|dump'    # what this build's dev console offers
+node $S console app_status 570     # ask the client directly
+```
+
+`inject` watches the same stream while it applies your file and reports what it heard in
+`backendErrors`.
+
+## Recovering from a crash
+
+Injecting into a live client sometimes takes it down. `logs` and `watch` exit 1 when the CDP
+connection drops, and `watch` prints the backend lines it captured first — after a crash that tail
+is the only copy left.
+
+```bash
+node $S status                     # exit 1 → the client is gone
+node $S restart client --confirm   # relaunches with debugging enabled, waits for ready
+node $S inject js plugin.js        # re-apply; nothing survived
+```
+
+`restart js --confirm` is the cheaper step when only the UI is wedged — about a second, and CDP
+survives. Both refuse while a game is running, and `restart client` also refuses during a
+download.
+
+`restart client` shuts Steam down and launches it again itself rather than calling
+`SteamClient.User.StartRestart()`, because Steam's own restart drops `-cef-enable-debugging` and
+the client would come back unreachable.
 
 Full semantics in [reference/commands.md](reference/commands.md).
 
@@ -277,9 +328,11 @@ look one up rather than reusing it from notes. Full playbook in
 | [reference/commands.md](reference/commands.md) | Per-command semantics and output shapes |
 | [reference/targets.md](reference/targets.md) | Windows, popups, routes, navigation |
 | [reference/injection.md](reference/injection.md) | CSS/JS injection, CEF paint traps, plugin patterns |
-| [reference/troubleshooting.md](reference/troubleshooting.md) | Log sources, error tables, React decoding |
+| [reference/troubleshooting.md](reference/troubleshooting.md) | Log streams, error tables, React decoding, crash recovery |
+| [reference/steam-client-api.md](reference/steam-client-api.md) | Calling a `SteamClient` API the CLI does not wrap |
 | [reference/remote.md](reference/remote.md) | Steam Deck / SteamOS — verified on hardware |
 | [reference/launch-options.md](reference/launch-options.md) | Full Steam command-line reference — optional, rarely needed |
+| [docs/steam-client/](docs/steam-client/) | TypeScript definitions for the whole `SteamClient` surface |
 
 ---
 
@@ -301,6 +354,11 @@ reference link.
 `--diff` and `--settle`, the full `inject` lifecycle including teardown, `watch` hot-reload,
 `doctor`, `dom`, `classes`, log filtering, and the usage/failure exit codes.
 
+It also covers the debug loop end to end: `console` against Steam's own command table, backend
+spew arriving over `logs --source backend`, `inject` reporting a deliberately-refused
+`SteamClient` call, every `restart` guardrail, and — on desktop only — an actual `restart js` that
+must replace the JS context and come back ready.
+
 ### Choosing the device
 
 | | Desktop | Steam Deck |
@@ -310,8 +368,8 @@ reference link.
 | Steam auto-launched | yes | **never** |
 
 Every command in the suite gets the device's `--host`/`--port` automatically, so the same tests
-validate both. Two assertions are device-aware: `NotificationToasts` must resolve on desktop and
-must be absent on a Deck.
+validate both. The only device-aware case is `restart js`, which is skipped anywhere the suite is
+not allowed to launch Steam — it must never restart someone else's device.
 
 ```bash
 STEAM_DEBUG_DEVICE=deck node --test test/smoke.mjs

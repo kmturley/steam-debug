@@ -183,6 +183,36 @@ describe('registry agrees with the handlers', () => {
   });
 });
 
+describe('behaviour that is easy to "simplify" back into a bug', () => {
+  test('restart client relaunches Steam rather than asking Steam to restart itself', () => {
+    // Steam's own restart drops -cef-enable-debugging, so the client returns alive and
+    // unreachable and the crash-recovery loop stops working. Measured on macOS.
+    const start = SOURCE.indexOf('function cmdRestartClient(');
+    assert.ok(start !== -1, 'cmdRestartClient not found — was restart client removed?');
+    const next = SOURCE.slice(start + 1).search(/\n(?:async )?function \w+\(/);
+    const body = SOURCE.slice(start, next === -1 ? undefined : start + 1 + next);
+
+    assert.ok(!/SteamClient\.User\.StartRestart/.test(body),
+      'cmdRestartClient must not use SteamClient.User.StartRestart — it relaunches Steam ' +
+      'without -cef-enable-debugging, leaving the client unreachable.');
+    assert.ok(/spawn\(/.test(body),
+      'cmdRestartClient must launch Steam itself so it comes back debuggable');
+  });
+
+  test('the documented --source values match the implementation', () => {
+    const m = SOURCE.match(/const LOG_SOURCES = \[([^\]]+)\]/);
+    assert.ok(m, 'could not locate LOG_SOURCES in steam-debug.mjs');
+    const implemented = [...m[1].matchAll(/'([a-z]+)'/g)].map(x => x[1]);
+
+    const documented = SKILL.match(/`--source <([^>]+)>`/);
+    assert.ok(documented, 'SKILL.md section 4 does not document --source values');
+    const named = documented[1].split('\\|').map(s => s.trim());
+
+    assert.deepEqual(named, implemented,
+      `SKILL.md documents --source ${named} but the CLI accepts ${implemented}`);
+  });
+});
+
 describe('docs do not invent commands', () => {
   test('every documented invocation is a real command', () => {
     const commands = new Set(cliCommands());
