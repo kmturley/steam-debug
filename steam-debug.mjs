@@ -12,6 +12,9 @@
  *   targets                         List all active CDP debug targets
  *   eval <expr> [--target <title>]  Evaluate JS in SharedJSContext (or named target)
  *   errors [--target <title>]       Show captured console.error calls
+ *   logs [--source backend]         Stream console, browser and Steam-backend output
+ *   console <cmd> | console list    Run a Steam console command, or list what exists
+ *   restart <js|client> --confirm   Restart the UI or the client, and wait for it to return
  *   react                           Detect React version in Steam's webpack bundle
  *   styles <selector> [--target t]  Computed styles + layout for a CSS selector
  *   webpack <pattern>               Search webpack modules [--limit N] [--ignore-case]
@@ -33,6 +36,7 @@
  */
 
 import { readFileSync, writeFileSync, watch as fsWatch } from 'node:fs';
+import { spawn } from 'node:child_process';
 import { basename } from 'node:path';
 import { inflateSync } from 'node:zlib';
 import { AsyncLocalStorage } from 'node:async_hooks';
@@ -69,7 +73,41 @@ const EXIT_USAGE = 2;   // the invocation itself was wrong
 class UsageError extends Error {}
 
 const LOG_LEVELS = ['all', 'warn', 'error'];
-const LOG_SOURCES = ['all', 'console', 'browser'];
+
+/**
+ * Log channels. `backend` is Steam's own spew — the stream you would see running Steam from a
+ * terminal with -dev. It is the only channel that reports which *Steam component* rejected a
+ * call, so it is the one that explains a crash the other two cannot see.
+ */
+const LOG_SOURCES = ['all', 'console', 'browser', 'backend'];
+
+/** CDP binding name used to forward backend spew out of the page. */
+const SPEW_BINDING = 'steamDebugSpew';
+
+/** Backend lines kept in memory, so a crash still leaves a readable tail behind. */
+const SPEW_RING_LINES = 200;
+
+/** A console command is finished when no new spew has arrived for this long. */
+const CONSOLE_QUIET_MS = 400;
+const CONSOLE_MAX_WAIT_MS = 8_000;
+
+/** How long to keep listening for backend fallout after an injection is applied. */
+const INJECT_SPEW_WINDOW_MS = 750;
+
+/**
+ * Console commands that deliberately break the client. `minidump_crash` exists to test crash
+ * reporting and takes Steam down every time; requiring --confirm keeps it from being reached by
+ * pattern-matching off the command list.
+ */
+const DANGEROUS_CONSOLE_COMMANDS = new Set(['minidump_crash', 'minidump_assert']);
+
+/** Seed characters used to enumerate the console command table via autocomplete. */
+const CONSOLE_SEEDS = 'abcdefghijklmnopqrstuvwxyz0123456789_@';
+
+/** How long to wait for the client to come back after a restart. */
+const RESTART_WAIT_MS = 90_000;
+const RESTART_POLL_MS = 1_000;
+
 const SETTLE_TIMEOUT_MS = 15_000;
 const SETTLE_INTERVAL_MS = 300;
 /** Consecutive matching frame pairs required before the screen counts as settled. */
@@ -94,6 +132,7 @@ class CdpSession {
   #nextId = 1;
   #pending = new Map();
   #handlers = new Map();
+  #closing = false;
   #ws;
 
   constructor(ws) {
@@ -151,7 +190,17 @@ class CdpSession {
     this.#handlers.get(event).add(handler);
   }
 
-  close() { this.#ws.close(); }
+  /**
+   * Called when the socket drops. During a long-running command that means the target went away —
+   * usually because Steam crashed or was restarted — which is otherwise indistinguishable from
+   * a quiet stream.
+   */
+  onClose(handler) { this.#ws.addEventListener('close', handler); }
+
+  /** True once we closed the socket ourselves, so an unexpected drop stays distinguishable. */
+  get closing() { return this.#closing; }
+
+  close() { this.#closing = true; this.#ws.close(); }
 }
 
 // ─── Steam CDP helpers ───────────────────────────────────────────────────────
@@ -301,6 +350,110 @@ async function evaluate(session, expression) {
   return result?.result?.value;
 }
 
+// ─── Backend spew — Steam's own log stream ───────────────────────────────────
+// SteamClient.Console.RegisterForSpewOutput carries the output Steam writes when it is run from
+// a terminal with -dev, including the backend's side of a failed SteamClient call. It is the
+// only channel that names the Steam component that refused, so it is what makes a failed
+// injection explainable rather than just "nothing happened".
+
+/** Raised when the target has no Console API — a browser view rather than the shared context. */
+class NoBackendChannel extends Error {}
+
+/** Map Steam's spew types onto the level vocabulary the rest of the tool already uses. */
+function spewLevel(type) {
+  if (type === 'error' || type === 'assert') return 'error';
+  if (type === 'warning') return 'warning';
+  return 'info';
+}
+
+/**
+ * Forward Steam's backend spew out of the page over a CDP binding.
+ *
+ * A binding rather than console.log: the console channel is one of the streams being reported on,
+ * so routing backend lines through it would make each stream contaminate the other.
+ *
+ * Returns a handle whose `ring` holds the most recent lines. That buffer is the point — when the
+ * client dies, the CDP session dies with it, and only what was already forwarded survives.
+ */
+async function attachSpew(session, onLine) {
+  const ring = [];
+
+  session.on('Runtime.bindingCalled', (params) => {
+    if (params?.name !== SPEW_BINDING) return;
+    let raw;
+    try { raw = JSON.parse(params.payload); } catch { return; }
+    const line = {
+      type: raw.spew_type ?? 'info',
+      level: spewLevel(raw.spew_type),
+      text: String(raw.spew ?? '').replace(/\s+$/, ''),
+      at: new Date().toISOString(),
+    };
+    if (!line.text) return;
+    ring.push(line);
+    if (ring.length > SPEW_RING_LINES) ring.shift();
+    onLine?.(line);
+  });
+
+  await session.send('Runtime.addBinding', { name: SPEW_BINDING }, EVAL_TIMEOUT_MS);
+
+  const installed = await evaluate(session, `(() => {
+    if (typeof SteamClient === 'undefined' || !SteamClient.Console?.RegisterForSpewOutput) {
+      return 'unavailable';
+    }
+    // Re-running must not stack listeners: every attach replaces the previous one.
+    try { window.__steam_debug_spew?.unregister?.(); } catch (e) {}
+    window.__steam_debug_spew = SteamClient.Console.RegisterForSpewOutput(o => {
+      try {
+        ${SPEW_BINDING}(JSON.stringify(o));
+      } catch (e) {
+        // The binding dies with the CDP session. Without this the callback would throw on
+        // every backend line, inside Steam's own spew dispatcher — so it retires itself.
+        try { window.__steam_debug_spew?.unregister?.(); } catch (e2) {}
+        window.__steam_debug_spew = null;
+      }
+    });
+    return 'ok';
+  })()`);
+
+  if (installed !== 'ok') {
+    throw new NoBackendChannel(
+      'This target has no SteamClient.Console — backend spew is only available where SteamClient ' +
+      'lives (SharedJSContext). Drop --target, or narrow to --source console.');
+  }
+
+  return {
+    ring,
+    async detach() {
+      try {
+        await evaluate(session, 'window.__steam_debug_spew?.unregister?.(); undefined');
+      } catch { /* the target may already be gone — the ring buffer is the point */ }
+    },
+  };
+}
+
+/** One backend line, in the same `[LEVEL] (source) text` shape the other log channels use. */
+function formatSpewLine(line) {
+  const tag = { error: 'ERROR', warning: 'WARN ', info: 'INFO ' }[line.level] ?? 'INFO ';
+  return `[${tag}] (backend) ${line.text}`;
+}
+
+/**
+ * Wait until the backend has been quiet for a beat.
+ *
+ * Console commands answer asynchronously and in an unknown number of lines, so there is nothing
+ * to await — quiet is the only available end-of-output signal.
+ */
+async function waitForQuiet(handle, { quietMs = CONSOLE_QUIET_MS, maxMs = CONSOLE_MAX_WAIT_MS } = {}) {
+  const deadline = Date.now() + maxMs;
+  let seen = -1;
+  while (Date.now() < deadline) {
+    if (handle.ring.length === seen) return true;
+    seen = handle.ring.length;
+    await sleep(quietMs);
+  }
+  return false;
+}
+
 // ─── Commands ────────────────────────────────────────────────────────────────
 
 async function cmdStatus(opts) {
@@ -339,6 +492,9 @@ async function cmdStatus(opts) {
         moduleCount,
         steamInit: !!(window.App?.BFinishedInitStageOne?.()),
         href: location.href,
+        // Identifies this incarnation of the JS context. A different value on a later call means
+        // the context restarted in between — so injections are gone and state was reset.
+        contextStarted: new Date(performance.timeOrigin).toISOString(),
       };
     })())`);
     const s = JSON.parse(raw);
@@ -350,6 +506,8 @@ async function cmdStatus(opts) {
       moduleCount: s.moduleCount,
       steamInit: s.steamInit,
       contextUrl: s.href,
+      contextStarted: s.contextStarted,
+      uptimeSeconds: Math.round((Date.now() - Date.parse(s.contextStarted)) / 1000),
       ready: !!(s.hasWebpack && s.steamInit),
     }, () => {
       console.log(`CDP endpoint:  ${endpoint}`);
@@ -360,6 +518,7 @@ async function cmdStatus(opts) {
       console.log('Webpack bundle:  ', s.hasWebpack ? `✓ (${s.moduleCount} modules)` : '✗ not found');
       console.log('Steam init done: ', s.steamInit ? '✓' : '✗');
       console.log('Context URL:     ', s.href);
+      console.log('Context started: ', `${s.contextStarted} (changes when the UI restarts)`);
     });
   } finally {
     session.close();
@@ -420,6 +579,7 @@ async function cmdDoctor(opts) {
           hasGamepadWindow: !!window.SteamUIStore?.m_WindowStore?.GamepadUIMainWindowInstance,
           injections: Object.keys(window.__steam_debug_injections ?? {}),
           errorShim: !!console.__steam_debug_patched,
+          spewListener: !!window.__steam_debug_spew,
         };
       })())`);
       const s = JSON.parse(raw);
@@ -439,6 +599,10 @@ async function cmdDoctor(opts) {
       if (s.errorShim) {
         add('console.error shim', true, 'installed by `errors`',
           'Clears on reload; harmless, but it wraps console.error.');
+      }
+      if (s.spewListener) {
+        add('Backend spew listener', true, 'left by an interrupted logs/watch/console run',
+          'Harmless — it retires itself the next time Steam spews. Clears on reload.');
       }
     } catch (e) {
       add('SharedJSContext probe', false, e.message, 'Could not evaluate in the shared context.');
@@ -1135,6 +1299,7 @@ async function cmdLogs(opts) {
     const source = (opts.source ?? 'all').toLowerCase();
     const wantConsole = source === 'all' || source === 'console';
     const wantBrowser = source === 'all' || source === 'browser';
+    const wantBackend = source === 'all' || source === 'backend';
     const grep = opts.grep ? new RegExp(opts.grep) : null;
 
     process.stderr.write(`Streaming logs from: ${target.title}\n`);
@@ -1188,12 +1353,392 @@ async function cmdLogs(opts) {
 
     await session.send('Log.enable', {}, EVAL_TIMEOUT_MS);
 
+    // SteamClient.Console spew — the backend's own output, and the only channel that reports
+    // which Steam component rejected a call.
+    let spewHandle = null;
+    if (wantBackend) {
+      try {
+        spewHandle = await attachSpew(session, (line) => {
+          if (line.level === 'error' && !showError) return;
+          if (line.level === 'warning' && !showWarn) return;
+          if (!showAll && line.level !== 'error' && line.level !== 'warning') return;
+          if (grep && !grep.test(line.text)) return;
+
+          if (opts.json) {
+            process.stdout.write(`${JSON.stringify({
+              channel: 'backend', level: line.level, type: line.type, text: line.text,
+            })}\n`);
+            return;
+          }
+          process.stdout.write(`${formatSpewLine(line)}\n`);
+        });
+      } catch (e) {
+        // Explicitly asked for: a failure is the answer. Part of --source all: report and carry
+        // on with the channels that do work, rather than losing the whole stream.
+        if (source === 'backend') throw e;
+        process.stderr.write(`Backend channel unavailable: ${e.message}\n\n`);
+      }
+    }
+
+    // A dropped socket during a stream means the target went away — report it as a failure
+    // rather than exiting 0 as though the user had stopped the stream.
+    let crashed = false;
+    session.onClose(() => {
+      if (session.closing) return;
+      crashed = true;
+      process.stderr.write('\nCDP connection dropped — the target went away (Steam crashed, ' +
+        'restarted, or the window closed).\nRe-check with: status\n');
+    });
+
     await new Promise(resolve => {
+      session.onClose(resolve);
       process.once('SIGINT', resolve);
       process.once('SIGTERM', resolve);
     });
+
+    // Leaving the listener registered would leave Steam calling a binding that dies with this
+    // process. The in-page callback retires itself if that happens, but not leaving it is better.
+    if (!crashed) await spewHandle?.detach();
+
+    if (crashed) process.exit(EXIT_FAIL);
   });
   process.exit(0);
+}
+
+/**
+ * Run a Steam console command, or list the ones that exist.
+ *
+ * This is the same console the client exposes in developer mode. Its answers arrive as backend
+ * spew rather than as a return value, so the command is issued and the spew it produces is
+ * collected until the backend goes quiet.
+ */
+async function cmdConsole(rest, opts) {
+  const USAGE = 'Usage: console <steam-console-command> | console list [pattern]';
+  if (!rest.length) throw new UsageError(USAGE);
+  if (rest[0] === 'list') return cmdConsoleList(rest[1], opts);
+
+  const command = rest.join(' ');
+  const verb = rest[0].toLowerCase();
+  if (DANGEROUS_CONSOLE_COMMANDS.has(verb) && !opts.confirm) {
+    throw new UsageError(
+      `"${verb}" deliberately crashes or asserts the Steam client (R9).\n` +
+      'It exists to test crash reporting, and will take down the session you are debugging.\n' +
+      `Re-run with --confirm if that is genuinely what you want: console ${command} --confirm`);
+  }
+
+  // Always the shared context: the console is client-wide, and it is the only target that has it.
+  await withSession({ port: opts.port, host: opts.host }, async (session, target) => {
+    const spew = await attachSpew(session);
+    const before = spew.ring.length;
+
+    await evaluate(session, `SteamClient.Console.ExecCommand(${JSON.stringify(command)}); undefined`);
+    const quiet = await waitForQuiet(spew);
+    await spew.detach();
+
+    // The echoed command comes back as spew_type "input"; it is noise in the reply.
+    const lines = spew.ring.slice(before).filter(l => l.type !== 'input');
+    const notFound = lines.some(l => /command not found/i.test(l.text));
+
+    emit(opts, {
+      command,
+      target: target.title,
+      lines: lines.map(({ type, level, text }) => ({ type, level, text })),
+      notFound,
+      truncated: !quiet,
+    }, () => {
+      if (!lines.length) {
+        process.stderr.write(`Ran "${command}" — the backend produced no output.\n`);
+        return;
+      }
+      for (const line of lines) console.log(formatSpewLine(line));
+      if (!quiet) process.stderr.write('\nBackend still talking — output may be incomplete.\n');
+    });
+
+    // An unknown command is a failed invocation, not an empty result: without this it would
+    // read as "ran fine, said nothing".
+    if (notFound) {
+      process.stderr.write(`No such console command: "${verb}". Try: console list ${verb}\n`);
+      process.exitCode = EXIT_FAIL;
+    }
+  });
+}
+
+/**
+ * Enumerate the console command table.
+ *
+ * There is no "list everything" call, so the table is reconstructed by asking autocomplete about
+ * each possible first character and merging the answers.
+ */
+async function cmdConsoleList(pattern, opts) {
+  const re = pattern
+    ? new RegExp(pattern, opts['ignore-case'] ? 'i' : '')
+    : null;
+
+  await withSession({ port: opts.port, host: opts.host }, async (session, target) => {
+    const raw = await evaluate(session, `(async () => {
+      const all = new Set();
+      for (const c of ${JSON.stringify(CONSOLE_SEEDS)}) {
+        const hits = await SteamClient.Console.GetAutocompleteSuggestions(c);
+        for (const h of hits ?? []) all.add(h);
+      }
+      return JSON.stringify([...all].sort());
+    })()`);
+
+    const every = JSON.parse(raw);
+    const matched = re ? every.filter(c => re.test(c)) : every;
+    const shown = opts.limit ? matched.slice(0, opts.limit) : matched;
+
+    emit(opts, {
+      target: target.title, total: every.length, matched: matched.length, commands: shown,
+    }, () => {
+      process.stderr.write(
+        `${matched.length} of ${every.length} console commands${pattern ? ` matching /${pattern}/` : ''}\n`);
+      for (const c of shown) console.log(c);
+      if (shown.length < matched.length) {
+        process.stderr.write(`\n(${matched.length - shown.length} more — raise --limit)\n`);
+      }
+    });
+
+    if (!matched.length) process.exitCode = EXIT_FAIL;
+  });
+}
+
+/**
+ * Read the state that makes a restart destructive.
+ *
+ * Returns null when the client cannot be asked, which is treated as "assume busy" — refusing a
+ * restart we cannot justify is cheaper than dropping someone's download.
+ */
+async function readClientBusy(session) {
+  const raw = await evaluate(session, `(async () => {
+    const running = (window.SteamUIStore?.RunningApps ?? []).map(a => a?.display_name ?? String(a?.appid ?? '?'));
+    const overview = await new Promise(resolve => {
+      let settled = false;
+      const finish = v => { if (!settled) { settled = true; resolve(v); } };
+      try { SteamClient.Downloads.RegisterForDownloadOverview(finish); } catch (e) { finish(null); }
+      setTimeout(() => finish(null), 1500);
+    });
+    return JSON.stringify({
+      runningApps: running,
+      downloading: !!(overview && overview.update_appid !== 0),
+      downloadState: overview ? overview.update_state : null,
+    });
+  })()`);
+  return JSON.parse(raw);
+}
+
+/**
+ * Wait for the shared JS context to come back, and to be a *different* one.
+ *
+ * Comparing against the pre-restart context start time is what distinguishes "it restarted and
+ * is ready" from "we reconnected to the instance that has not gone down yet".
+ */
+async function waitForContext(opts, previousStarted, timeoutMs = RESTART_WAIT_MS) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      const endpoint = await findEndpoint(opts);
+      const targets = await listTargets(endpoint);
+      const ctx = targets.find(t => isSharedContext(t.title, t.url));
+      if (ctx) {
+        const session = await openSession(rewriteWsHost(ctx.webSocketDebuggerUrl, endpoint));
+        try {
+          const raw = await evaluate(session, `JSON.stringify({
+            started: new Date(performance.timeOrigin).toISOString(),
+            hasWebpack: !!window.webpackChunksteamui,
+            steamInit: !!(window.App?.BFinishedInitStageOne?.()),
+          })`);
+          const s = JSON.parse(raw);
+          if (s.started !== previousStarted && s.hasWebpack && s.steamInit) return s;
+        } finally {
+          session.close();
+        }
+      }
+    } catch { /* still down — that is the expected state for most of this loop */ }
+    await sleep(RESTART_POLL_MS);
+  }
+  return null;
+}
+
+/** Report why a restart would be destructive right now, or an empty list. */
+function restartBlockers(busy, mode) {
+  const blockers = [];
+  if (busy.runningApps.length) blockers.push(`running: ${busy.runningApps.join(', ')}`);
+  // A JS context restart reloads the UI; it does not touch the download queue.
+  if (mode === 'client' && busy.downloading) {
+    blockers.push(`download in progress (${busy.downloadState})`);
+  }
+  return blockers;
+}
+
+/**
+ * Restart the Steam UI, or the whole client, and wait for it to come back.
+ *
+ * Guarded three ways (R9): it needs --confirm, it refuses while a game is running (and, for a
+ * client restart, while anything is downloading), and it says plainly that every injection is
+ * gone afterwards.
+ */
+async function cmdRestart(mode, opts) {
+  const USAGE = 'Usage: restart <js|client> --confirm';
+  if (mode !== 'js' && mode !== 'client') throw new UsageError(USAGE);
+
+  if (!opts.confirm) {
+    throw new UsageError(
+      `restart ${mode} interrupts the user's running client and drops every injection (R9).\n` +
+      `Ask the user first, then re-run with --confirm: restart ${mode} --confirm`);
+  }
+
+  return mode === 'js' ? cmdRestartJs(opts) : cmdRestartClient(opts);
+}
+
+/**
+ * Restart just the JS context — the fast path, and the one the iterate loop wants.
+ *
+ * The client keeps running, so CDP comes back on the same port within a couple of seconds. This
+ * clears a wedged UI and every injection without disturbing games or downloads.
+ */
+async function cmdRestartJs(opts) {
+  await withSession({ port: opts.port, host: opts.host }, async (session) => {
+    const busy = await readClientBusy(session);
+    const blockers = restartBlockers(busy, 'js');
+    if (blockers.length) {
+      emit(opts, { mode: 'js', restarted: false, blockedBy: blockers }, () => {
+        console.error(`Refusing to restart the UI — ${blockers.join('; ')}.`);
+        console.error('A UI reload disturbs the in-game overlay. Close the game first.');
+      });
+      process.exitCode = EXIT_FAIL;
+      return;
+    }
+
+    const before = await evaluate(session, 'new Date(performance.timeOrigin).toISOString()');
+    process.stderr.write('Restarting the JS context — the CDP session will drop.\n');
+    // The call tears down the context running it, so a lost connection here is success.
+    try {
+      await evaluate(session, 'SteamClient.Browser.RestartJSContext(); undefined');
+    } catch { /* expected */ }
+
+    const back = await waitForContext(opts, before);
+    emit(opts, {
+      mode: 'js',
+      restarted: !!back,
+      contextStartedBefore: before,
+      contextStartedAfter: back?.started ?? null,
+    }, () => {
+      if (back) {
+        console.log(`UI restarted. New context started ${back.started}.`);
+        console.log('Every injection is gone — re-apply what you need.');
+      } else {
+        console.error(`The UI did not come back within ${RESTART_WAIT_MS / 1000}s.`);
+      }
+    });
+
+    if (!back) process.exitCode = EXIT_FAIL;
+  });
+}
+
+/** How to launch Steam with CDP open, per platform. Mirrors SKILL.md Phase 0. */
+const DEBUG_LAUNCH_FLAGS = ['-dev', '-windowed', '-cef-enable-debugging', '-gamepadui'];
+const LAUNCH_COMMAND = {
+  darwin: ['open', ['-a', 'Steam', '--args', ...DEBUG_LAUNCH_FLAGS]],
+  linux: ['steam', DEBUG_LAUNCH_FLAGS],
+  win32: ['steam.exe', DEBUG_LAUNCH_FLAGS],
+};
+
+/** Poll until the CDP endpoint stops answering, i.e. the old client is really gone. */
+async function waitForShutdown(opts, timeoutMs = RESTART_WAIT_MS) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try { await findEndpoint(opts); } catch { return true; }
+    await sleep(RESTART_POLL_MS);
+  }
+  return false;
+}
+
+/**
+ * Shut the client down and launch it again with debugging enabled.
+ *
+ * Deliberately not SteamClient.User.StartRestart: that relaunches Steam with
+ * `-cef-enable-debugging` stripped from its arguments, so the client comes back alive but
+ * unreachable — measured on macOS, and the whole loop dies there. Shutting down and launching
+ * ourselves is the only way the client returns debuggable.
+ *
+ * Works when Steam has already crashed: an unreachable endpoint just means there is nothing to
+ * shut down, so it goes straight to launching.
+ */
+async function cmdRestartClient(opts) {
+  if (opts.host && !LOCAL_HOSTS.has(opts.host)) {
+    throw new UsageError(
+      `restart client cannot work over --host: relaunching Steam needs to start a process on ` +
+      `that machine, and Steam's own restart drops the debugging flag.\n` +
+      `Ask the user to restart Steam on ${opts.host}. \`restart js\` does work remotely.`);
+  }
+
+  const launch = LAUNCH_COMMAND[process.platform];
+  if (!launch) {
+    throw new UsageError(
+      `No launch command known for platform "${process.platform}". Restart Steam manually with: ` +
+      DEBUG_LAUNCH_FLAGS.join(' '));
+  }
+
+  let before = null;
+  let reachable = true;
+  try {
+    await withSession({ port: opts.port, host: opts.host }, async (session) => {
+      const busy = await readClientBusy(session);
+      const blockers = restartBlockers(busy, 'client');
+      if (blockers.length) {
+        throw new UsageError(
+          `Refusing to restart Steam — ${blockers.join('; ')}.\n` +
+          'A client restart drops running games and in-progress downloads.');
+      }
+      before = await evaluate(session, 'new Date(performance.timeOrigin).toISOString()');
+      process.stderr.write('Shutting Steam down…\n');
+      try {
+        await evaluate(session, 'SteamClient.User.StartShutdown(false); undefined');
+      } catch { /* the context goes away mid-call */ }
+    });
+  } catch (e) {
+    if (e instanceof UsageError) throw e;
+    // No endpoint: Steam already crashed or is not running. Launching is exactly the remedy.
+    reachable = false;
+    process.stderr.write('Steam is not reachable — treating it as down and launching it.\n');
+  }
+
+  if (reachable && !await waitForShutdown(opts)) {
+    console.error('Steam is still answering after a shutdown request — not launching a second copy.');
+    process.exitCode = EXIT_FAIL;
+    return;
+  }
+
+  const [cmd, args] = launch;
+  process.stderr.write(`Launching: ${cmd} ${args.join(' ')}\n`);
+  try {
+    spawn(cmd, args, { detached: true, stdio: 'ignore' }).unref();
+  } catch (e) {
+    console.error(`Could not launch Steam (${e.message}). Start it manually with:`);
+    console.error(`  ${cmd} ${args.join(' ')}`);
+    process.exitCode = EXIT_FAIL;
+    return;
+  }
+
+  const back = await waitForContext(opts, before);
+  emit(opts, {
+    mode: 'client',
+    restarted: !!back,
+    launchedWith: [cmd, ...args].join(' '),
+    contextStartedBefore: before,
+    contextStartedAfter: back?.started ?? null,
+  }, () => {
+    if (back) {
+      console.log(`Steam restarted. New context started ${back.started}.`);
+      console.log('Every injection is gone — re-apply what you need.');
+    } else {
+      console.error(`Steam did not become debuggable within ${RESTART_WAIT_MS / 1000}s.`);
+      console.error('It may still be signing in — check with: status');
+    }
+  });
+
+  if (!back) process.exitCode = EXIT_FAIL;
 }
 
 // ─── Minimal PNG decode, for screenshot --diff ───────────────────────────────
@@ -1536,11 +2081,24 @@ async function cmdInject(rest, opts) {
   const expression = buildInjectExpression(mode, source, slug);
 
   await withSession(opts, async (session, target) => {
+    // Listen before injecting: a SteamClient call the backend refuses reports the reason here
+    // and nowhere else, and the JS side often succeeds anyway.
+    let spew = null;
+    try { spew = await attachSpew(session); } catch { /* browser views have no console */ }
+
     const result = JSON.parse(await evaluate(session, expression));
     if (!result.ok) {
+      await spew?.detach();
       console.error(`Injection failed for "${slug}".`);
       process.exitCode = EXIT_FAIL;
       return;
+    }
+
+    let backendErrors = [];
+    if (spew) {
+      await sleep(INJECT_SPEW_WINDOW_MS);
+      backendErrors = spew.ring.filter(l => l.level === 'error').map(l => l.text);
+      await spew.detach();
     }
 
     process.stderr.write(`Injected ${mode} "${slug}" into ${target.title}\n`);
@@ -1551,10 +2109,17 @@ async function cmdInject(rest, opts) {
       process.stderr.write(
         'Warning: no teardown. Return a function from the file to make removal possible.\n');
     }
+    // Reported, not fatal: the artifact did install, and the backend may have been complaining
+    // about something else entirely. Exit code would make that ambiguity look like certainty.
+    if (backendErrors.length) {
+      process.stderr.write(`\nSteam's backend reported ${backendErrors.length} error(s) during injection:\n`);
+      for (const text of backendErrors) process.stderr.write(`  ${text}\n`);
+      process.stderr.write('These may be unrelated. Confirm with: logs --source backend\n\n');
+    }
     process.stderr.write(`Remove with: inject remove ${slug}\n`);
     process.stderr.write('Injections do not survive a page reload or Steam restart.\n');
 
-    printJson({ id: slug, type: mode, target: target.title });
+    printJson({ id: slug, type: mode, target: target.title, backendErrors });
   });
 }
 
@@ -1631,6 +2196,19 @@ async function cmdWatch(rest, opts) {
     let applying = false;
     let coalesced = false;
 
+    // Backend errors surface as they happen, so a bad SteamClient call is attributable to the
+    // edit that caused it rather than discovered later out of context.
+    let spew = null;
+    try {
+      spew = await attachSpew(session, (line) => {
+        if (line.level === 'error' || line.level === 'warning') {
+          process.stderr.write(`${formatSpewLine(line)}\n`);
+        }
+      });
+    } catch {
+      process.stderr.write('Backend channel unavailable on this target — JS errors only.\n');
+    }
+
     const apply = async (reason) => {
       if (applying) { coalesced = true; return; }
       applying = true;
@@ -1673,13 +2251,33 @@ async function cmdWatch(rest, opts) {
     };
     startWatching();
 
+    // A watch is exactly when an injection takes the client down, so treat a dropped socket as
+    // the event it is and hand back the backend's last words — after the crash the only copy of
+    // them is the one already forwarded to this process.
+    let crashed = false;
     await new Promise(resolve => {
+      session.onClose(() => { if (!session.closing) { crashed = true; resolve(); } });
       process.once('SIGINT', resolve);
       process.once('SIGTERM', resolve);
     });
 
     clearTimeout(debounce);
     watcher?.close();
+
+    if (crashed) {
+      process.stderr.write('\nCDP connection dropped — Steam crashed, restarted, or closed.\n');
+      const tail = (spew?.ring ?? []).slice(-30);
+      if (tail.length) {
+        process.stderr.write(`\nLast ${tail.length} backend line(s) before the drop:\n`);
+        for (const line of tail) process.stderr.write(`  ${formatSpewLine(line)}\n`);
+      } else {
+        process.stderr.write('No backend output was captured before the drop.\n');
+      }
+      process.stderr.write('\nRecover with: status, then restart client --confirm if it is gone.\n');
+      process.exit(EXIT_FAIL);
+    }
+
+    await spew?.detach();
     process.stderr.write(
       `\nStopped. "${slug}" is still injected — remove with: inject remove ${slug}\n`);
   });
@@ -1700,7 +2298,10 @@ Commands:
   targets                         List all active CDP debug targets
   eval <expr> [--target <t>]      Evaluate a JS expression (default: SharedJSContext)
   errors [--target <t>]           Show captured console.error calls (point-in-time)
-  logs [--target <t>] [--level]   Stream live console output until Ctrl+C
+  logs [--target <t>] [--level]   Stream live console, browser and backend output until Ctrl+C
+  console <steam-command>         Run a Steam console command, print the backend's reply
+  console list [pattern]          List the console commands this build has
+  restart <js|client> --confirm   Restart the Steam UI, or the whole client, and wait for it back
   react                           Detect React in Steam's webpack bundle
   styles <selector> [--target t]  Computed styles + layout rect for a CSS selector
   dom <selector> [--depth N]      Dump an element subtree (structure, sizes, text)
@@ -1734,7 +2335,10 @@ Options:
                     optionally with its own port:  --host localhost,steamdeck:8081
                     Output is labelled per device; exit 0 only if all succeeded.
   --level <l>       Log level filter for 'logs': all (default), warn, error
-  --source <s>      Log channel for 'logs': all (default), console, browser
+  --source <s>      Log channel for 'logs': all (default), console, browser, backend.
+                    'backend' is Steam's own spew — the stream you would see running
+                    Steam from a terminal, and the only one that names the Steam
+                    component behind a failed call.
   --grep <regex>    Only show log lines matching this pattern
   --limit <n>       Max results for 'webpack' and 'classes' (positive integer)
   --ignore-case     Case-insensitive search for 'webpack' and 'classes'
@@ -1743,6 +2347,7 @@ Options:
   --diff <path>     Baseline PNG to compare a new capture against
   --file <path>     Read the expression for 'eval' from a file
   --id <slug>       Override the injection id (default: derived from the filename)
+  --confirm         Required by 'restart', and by console commands that crash the client
   --timeout <ms>    Per-request CDP timeout (default: 10000)
   --json            Machine-readable stdout. Accepted by every command; 'logs' emits
                     one JSON object per line.
@@ -1784,7 +2389,7 @@ function parseArgs(argv) {
     }
   }
 
-  const boolFlags = ['--ignore-case', '--json', '--settle'];
+  const boolFlags = ['--ignore-case', '--json', '--settle', '--confirm'];
   for (const flag of boolFlags) {
     const i = args.indexOf(flag);
     if (i !== -1) {
@@ -1910,6 +2515,8 @@ const COMMANDS = {
   eval:       { targetAware: true,  flags: ['file'],               run: (rest, opts) => cmdEval(rest.join(' '), opts) },
   errors:     { targetAware: true,  flags: [],                     run: (rest, opts) => cmdErrors(opts) },
   logs:       { targetAware: true,  flags: ['level', 'grep', 'source'], streaming: true, run: (rest, opts) => cmdLogs(opts) },
+  console:    { targetAware: false, flags: ['limit', 'ignore-case', 'confirm'], run: (rest, opts) => cmdConsole(rest, opts) },
+  restart:    { targetAware: false, flags: ['confirm'],             run: (rest, opts) => cmdRestart(rest[0], opts) },
   react:      { targetAware: false, flags: [],                     run: (rest, opts) => cmdReact(opts) },
   styles:     { targetAware: true,  flags: [],                     run: (rest, opts) => cmdStyles(rest[0], opts) },
   dom:        { targetAware: true,  flags: ['depth'],              run: (rest, opts) => cmdDom(rest[0], opts) },

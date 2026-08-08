@@ -89,16 +89,17 @@ node $S logs --level error --json          # one JSON object per line (NDJSON)
 | `--timeout <ms>` | all | `10000` | Per-request CDP timeout |
 | `--json` | all | off | Machine-readable stdout |
 | `--level <all\|warn\|error>` | `logs` | `all` | Any other value is rejected |
-| `--source <all\|console\|browser>` | `logs` | `all` | Which CDP channel to stream |
+| `--source <all\|console\|browser\|backend>` | `logs` | `all` | Which log stream to read; `backend` is Steam's own spew |
 | `--grep <regex>` | `logs` | — | Only lines matching this pattern |
-| `--limit <n>` | `webpack`, `classes` | `10` / `20` | Must be a positive integer |
-| `--ignore-case` | `webpack`, `classes` | off | Boolean, takes no value |
+| `--limit <n>` | `webpack`, `classes`, `console list` | `10` / `20` / unlimited | Must be a positive integer |
+| `--ignore-case` | `webpack`, `classes`, `console list` | off | Boolean, takes no value |
 | `--depth <n>` | `dom` | `2` | Subtree depth |
 | `--out <path>` | `screenshot` | derived from target title | Output PNG path |
 | `--diff <path>` | `screenshot` | — | Baseline PNG to compare against |
 | `--settle` | `screenshot` | off | Wait for the screen to stop changing first |
 | `--file <path>` | `eval` | — | Read the expression from a file |
 | `--id <slug>` | `inject`, `watch` | derived from filename | Alphanumeric and dashes only |
+| `--confirm` | `restart`, `console` | off | Required for anything that can take the client down |
 
 Flags are rejected rather than ignored, in two ways. A flag the command does not act on exits 2
 (`status --limit 5` is an error, not a no-op). So does an invalid value — an unrecognised
@@ -232,10 +233,11 @@ prefer `logs`.
 
 ## `logs`
 
-Streams until interrupted. Combines two CDP channels:
+Streams until interrupted. Combines three independent channels:
 
-- `Runtime.consoleAPICalled` — page `console.log/warn/error/info/debug`
-- `Log.entryAdded` — browser-level events: failed requests, CSP violations, security blocks
+- `console` — `Runtime.consoleAPICalled`: page `console.log/warn/error/info/debug`
+- `browser` — `Log.entryAdded`: failed requests, CSP violations, security blocks
+- `backend` — `SteamClient.Console` spew: Steam's own output, the stream a terminal launch shows
 
 ```bash
 node $S logs                            # everything
@@ -250,11 +252,100 @@ node $S logs --json                     # one JSON object per line
 `--grep` takes a JavaScript regular expression and is matched against the message text on both
 channels. An invalid pattern is rejected at startup rather than silently matching nothing.
 
-`--source` picks the channel: `console` is page `console.*`, `browser` is `Log.entryAdded`
-(failed requests, CSP violations, security blocks). Default `all`.
+`--source` picks one channel; the default `all` reads every one. Backend lines are tagged
+`(backend)` so their origin is unambiguous:
+
+```
+[ERROR] (backend) RaiseJSException: Method call failed: Downloads.EnableAllDownloads requires 2 arguments; only 1 given
+```
+
+That line is why the backend channel matters: the JavaScript call returned normally, and no other
+stream records the refusal (SKILL.md R11).
+
+The backend channel needs `SteamClient`, which only `SharedJSContext` has. Under `--source all` an
+unsupported target is reported and the other two channels continue; `--source backend` on such a
+target is an error. `--source` takes exactly one value.
+
+`logs` exits 1 if the CDP connection drops mid-stream, so a crash is distinguishable from a quiet
+system and from a user pressing Ctrl+C.
 
 `--level warn` includes errors. Any other value exits 2 with a message; it used to stream nothing
 at all, which looked exactly like a quiet system.
+
+## `console <steam-command>` / `console list [pattern]`
+
+Runs a command in Steam's own developer console — the one `-dev` exposes — and returns what the
+backend says. Always `SharedJSContext`: the console is client-wide, and no other target has it.
+
+```bash
+node $S console developer              # read a convar
+node $S console app_status 570         # per-app state, straight from the client
+node $S console log_ipc 1              # start IPC tracing; read it with logs --source backend
+node $S console list                   # every command this build has
+node $S console list 'log|dump' --limit 20
+```
+
+Answers arrive as backend spew rather than as a return value, so the command is issued and the
+spew it produces is collected until the backend falls quiet. `truncated: true` in the JSON means
+it was still talking when the wait expired.
+
+```json
+{
+  "command": "developer",
+  "lines": [{ "type": "info", "level": "info", "text": "\"developer\" = \"1\"" }],
+  "notFound": false,
+  "truncated": false
+}
+```
+
+An unknown command exits 1 with `notFound: true` — without that it would read as "ran fine, said
+nothing". The command table is build-specific; enumerate it with `console list` rather than
+assuming a command exists (SKILL.md R6).
+
+`console list` has no "list everything" call behind it: the table is reconstructed by asking
+autocomplete about each possible first character. `--limit` and `--ignore-case` apply to the
+pattern, as they do for `webpack`.
+
+Commands that deliberately crash or assert the client (`minidump_crash`, `minidump_assert`)
+require `--confirm`, so they cannot be reached by pattern-matching off the command list.
+
+## `restart <js|client>`
+
+Restarts the Steam UI, or the whole client, and waits for it to come back. Requires `--confirm`
+(SKILL.md R9). `--target` is rejected.
+
+| Mode | What it does | Cost | Remote |
+|---|---|---|---|
+| `js` | `SteamClient.Browser.RestartJSContext()` — reloads the UI context only | ~1 s, CDP survives | works |
+| `client` | Shuts Steam down, launches it again with debug flags | ~5 s, everything restarts | refused |
+
+```bash
+node $S restart js --confirm         # wedged UI, client fine
+node $S restart client --confirm     # client crashed or unreachable
+```
+
+Both refuse while a game is running. `restart client` also refuses during a download. Both report
+the context start time before and after, so the restart is verifiable rather than assumed:
+
+```json
+{
+  "mode": "client",
+  "restarted": true,
+  "launchedWith": "open -a Steam --args -dev -windowed -cef-enable-debugging -gamepadui",
+  "contextStartedBefore": "…",
+  "contextStartedAfter": "…"
+}
+```
+
+**`restart client` deliberately does not use `SteamClient.User.StartRestart()`.** That call does
+restart Steam, but the relaunched process drops `-cef-enable-debugging` — measured on macOS — so
+the client comes back alive and unreachable. Shutting down and launching it here is the only way
+it returns debuggable.
+
+It also handles an already-crashed client: an unreachable endpoint means there is nothing to shut
+down, so it goes straight to launching. That is what makes crash recovery a single command.
+
+Nothing survives either mode — re-apply every injection afterwards.
 
 ## `react`
 
@@ -563,8 +654,20 @@ never stacks duplicates. Rapid saves are debounced and coalesced.
 A failing edit is reported and **the watch continues**; losing the loop on every typo would
 defeat the point. Editors that save by renaming are handled by re-establishing the watch.
 
-On exit the injection is deliberately left in place, and the removal command is printed. Stopping
-a watch is not the same as undoing the change.
+Backend errors and warnings stream alongside the reload messages, so a `SteamClient` call the
+client refuses is attributable to the edit that caused it:
+
+```
+[08:37:41] changed: applied
+[ERROR] (backend) RaiseJSException: Method call failed: …
+```
+
+If the CDP connection drops — the client crashed, restarted, or closed — `watch` prints the last
+backend lines it captured and exits 1. **That tail is the only surviving copy:** the client that
+held the rest is gone. Recovery is `restart client --confirm`, then re-inject.
+
+On a clean exit the injection is deliberately left in place, and the removal command is printed.
+Stopping a watch is not the same as undoing the change.
 
 ## `inject <css|js> <file>` / `inject list` / `inject remove <slug>`
 
@@ -588,6 +691,22 @@ undone without a reload. It also warns when a stylesheet parses to zero rules.
 
 `inject list` reports registry entries plus any `steam-debug-*` style tags without one — those are
 marked `unregistered` and usually mean a hand-rolled `eval` injection.
+
+`inject` listens to Steam's backend stream for the moment it applies the file, and reports what it
+heard in `backendErrors`:
+
+```json
+{
+  "id": "my-plugin",
+  "type": "js",
+  "backendErrors": ["RaiseJSException: Method call failed: Downloads.EnableAllDownloads requires 2 arguments; only 1 given"]
+}
+```
+
+This is the case JavaScript cannot see: the call returned normally and the client refused it.
+The exit code stays 0 — the artifact did install, and the backend may have been complaining about
+something unrelated — so read the field, do not rely on the code alone (SKILL.md R11). Confirm
+with `logs --source backend` when it matters.
 
 Nothing injected survives a page reload or a Steam restart.
 

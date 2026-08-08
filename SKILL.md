@@ -86,11 +86,20 @@ Always give the user the removal command, and never describe an injection as per
 one is lost on reload or restart.
 
 **R9 — Never restart or kill Steam without explicit user confirmation.** A restart drops
-in-progress downloads, running games, and Remote Play sessions. Relaunching is the last rung of
-the Failure Ladder, not a first response.
+in-progress downloads, running games, and Remote Play sessions. Ask, then use `restart`, which
+requires `--confirm` and refuses while a game or download is active — never `pkill`. Prefer
+`restart js`, which reloads only the UI; escalate to `restart client` only when the client itself
+is gone or wedged. Relaunching is the last rung of the Failure Ladder, not a first response.
 
 **R10 — Report observed values verbatim.** Quote real IDs, counts, selectors, and versions from
 command output. Do not round, paraphrase, or reconstruct them from memory.
+
+**R11 — "Nothing happened" is not a diagnosis until the backend has been read.** A `SteamClient`
+call with wrong arguments, or one the client refuses, returns cleanly to JavaScript and fails
+silently in Steam's backend. Before reporting that code ran without effect, check
+`logs --source backend` (or the `backendErrors` field `inject` already returns). Never attribute
+a failure to the frontend when you have not looked at the only stream that names the component
+that refused.
 
 ---
 
@@ -98,10 +107,12 @@ command output. Do not round, paraphrase, or reconstruct them from memory.
 
 Sensible defaults. Override when the task calls for it, and say why.
 
-- Start every investigation at `SharedJSContext`; it is the only target with webpack and
-  `SteamUIStore`.
+- Start every investigation at `SharedJSContext`; it is the only target with webpack,
+  `SteamUIStore` and `SteamClient` — so it is also the only one with a backend log stream.
 - For a bug you can reproduce on demand, prefer `logs --level error` (live stream). Use `errors`
   only for point-in-time capture of what already happened.
+- Leave `logs` on its default `--source all` while debugging an injection. Narrowing to one
+  stream is how a backend rejection gets missed (R11).
 - Narrow `webpack` searches before widening them. Try an exact pattern first, then
   `--ignore-case`, then a shorter substring.
 - Answer CSS questions with `styles` rather than a hand-written `eval` of `getComputedStyle`.
@@ -124,6 +135,9 @@ Sensible defaults. Override when the task calls for it, and say why.
 | "What does this part of the UI look like structurally?" | `dom <selector> --target <win>` |
 | "Find the component / module for X" | Phase 2 → `webpack`, `module` |
 | "Something is broken / erroring" | Phase 2 → `logs`, `errors` → `reference/troubleshooting.md` |
+| "My code runs but nothing happens" | `logs --source backend` (R11) → `reference/troubleshooting.md` |
+| "Steam crashed / the connection dropped" | Phase 5 → `status`, `restart` |
+| "What can Steam's dev console do?" | `console list [pattern]`, then `console <cmd>` |
 | "Why does my CSS not show up?" | `reference/injection.md` § Why paint disappears |
 | "Inspect the Quick Access Menu / Main Menu" | `reference/targets.md` |
 | "What state does Steam hold?" | `stores`, `page`, `popups` |
@@ -143,7 +157,9 @@ This table is the single source of truth. It is verified against the implementat
 | `targets` | — | rejected | human text | 1 — no CDP endpoint |
 | `eval` | `<expr>` | **yes** | value, JSON, or a `(…)` descriptor | 1 — the expression threw |
 | `errors` | — | **yes** | human text | 1 — connect failure |
-| `logs` | — | **yes** | live `[LEVEL] message` stream | 2 — invalid `--level` |
+| `logs` | — | **yes** | live `[LEVEL] message` stream | 1 — the connection dropped mid-stream; 2 — invalid `--level` |
+| `console` | `<steam-command>`, `list [pattern]` | rejected | backend reply, or a command list | 1 — no such console command, or no match |
+| `restart` | `<js\|client>` | rejected | JSON | 1 — blocked by a running game or download, or Steam did not come back; 2 — missing `--confirm` |
 | `react` | — | rejected | JSON | 1 — React not found |
 | `styles` | `<selector>` | **yes** | JSON | 1 — selector matched nothing |
 | `dom` | `<selector>` | **yes** | tree, or JSON | 1 — selector matched nothing |
@@ -161,10 +177,10 @@ This table is the single source of truth. It is verified against the implementat
 | `help` | — | rejected | human text | — |
 
 **Flags:** `--target <name>`, `--port <n>`, `--host <addr>`, `--timeout <ms>`, `--json`,
-`--level <all\|warn\|error>`, `--source <all\|console\|browser>`, `--grep <regex>`, `--limit <n>`,
-`--ignore-case`, `--depth <n>`, `--out <path>`, `--diff <path>`, `--settle`, `--file <path>`,
-`--id <slug>`. There are no others. A flag sent to a command that does not act on it is rejected,
-not ignored, and invalid values are rejected too.
+`--level <all\|warn\|error>`, `--source <all\|console\|browser\|backend>`, `--grep <regex>`,
+`--limit <n>`, `--ignore-case`, `--depth <n>`, `--out <path>`, `--diff <path>`, `--settle`,
+`--file <path>`, `--id <slug>`, `--confirm`. There are no others. A flag sent to a command that
+does not act on it is rejected, not ignored, and invalid values are rejected too.
 
 **`--json` is accepted by every command** and guarantees machine-readable stdout — prefer it over
 parsing human text. `logs` emits one JSON object per line.
@@ -176,7 +192,12 @@ change behaves the same on desktop and on a Deck; see `reference/commands.md`.
 
 **`status` is the one command that reports failure with exit 0**, because reporting a not-ready
 client is its job. Branch on its `ready` field. `doctor` is the opposite: it exits 1 when
-anything is wrong, and names the remedy.
+anything is wrong, and names the remedy. `status` also reports `contextStarted` — a different
+value between two calls means the UI restarted in between, so every injection is gone.
+
+**Backend logs need no terminal, no SSH and no install.** `logs --source backend` streams Steam's
+own output through `SteamClient.Console`, on desktop and on a Deck alike. It is the only stream
+that names the Steam component behind a refused call. See §7 Phase 5.
 
 ---
 
@@ -244,6 +265,10 @@ it gave you. Work top to bottom; stop at the first rung that resolves the sympto
 | 13 | `--target is not supported by "<cmd>"` (exit 2) | — | That command always uses the shared context. Drop the flag; for window-specific work use `eval`, `styles`, or `module`. |
 | 14 | `--level`/`--limit` rejected (exit 2) | — | Invalid flag value. Use `all\|warn\|error`, or a positive integer. |
 | 15 | `Route unchanged (…) — no-op` (exit 1) | `page` | That alias does not move Big Picture; `account`, `chat`, and `friends` never do. Pick a route that exists. |
+| 16 | Injected code runs, nothing changes, console clean | `logs --source backend` | The backend refused a `SteamClient` call. Look for `RaiseJSException: Method call failed` — it names the method and the reason (R11). |
+| 17 | `CDP connection dropped` mid-stream (exit 1) | `status` | Steam crashed or restarted. `watch` prints the backend tail it captured; that tail is the traceback. Then rung 18. |
+| 18 | Steam is gone, or the UI is wedged | `status` | `restart js --confirm` for a wedged UI; `restart client --confirm` when the client itself died. Both need consent (R9). Re-inject afterwards — nothing survives. |
+| 19 | `Backend channel unavailable` | `targets` | `SteamClient` lives only in `SharedJSContext`. Drop `--target`, or narrow to `--source console`. |
 
 ---
 
@@ -364,7 +389,42 @@ trustworthy** — wait and retry before attributing any difference to your chang
 browser views composited outside the page, and CDP capture hangs on them. A Big Picture capture
 shows their backdrop effect but not the panel itself.
 
-### Phase 5 — Report and clean up
+### Phase 5 — Recover *(when the client breaks under you)*
+
+Injecting into a live client sometimes takes it down. This phase exists so that costs one command
+each, not a conversation with the user.
+
+**Diagnose.** Steam's backend is reached over CDP like everything else — no terminal launch, no
+SSH, nothing installed:
+
+```bash
+node $S logs --source backend --level error    # live
+node $S console list 'log|dump'                # what this build's dev console offers
+node $S console app_status 570                 # ask the client directly
+```
+
+Read this before concluding that injected code "did nothing" (R11). A `SteamClient` call the
+backend refuses returns cleanly to JavaScript and reports the real reason only here.
+
+**Detect.** Both streaming commands exit 1 when the CDP connection drops, and `watch` prints the
+backend lines it captured before the drop — after a crash that tail is the only copy left, since
+the client that held the rest is gone. `status` exposes `contextStarted`: a changed value between
+two calls means the UI restarted and every injection went with it.
+
+**Recover.** Ask the user, then take the smallest step that works (R9):
+
+| Situation | Command |
+|---|---|
+| UI wedged, client alive | `restart js --confirm` — about a second, keeps CDP, works over `--host` |
+| Client crashed or unreachable | `restart client --confirm` — shuts down if needed, relaunches with debug flags, waits for ready |
+| Remote device | `restart js` only; `restart client` cannot start a process on another machine |
+
+`restart` refuses while a game is running, and `restart client` also refuses during a download.
+Do not reach for `pkill` — it bypasses both guards.
+
+Then re-apply the injection: **nothing survives a restart of either kind.**
+
+### Phase 6 — Report and clean up
 
 Remove every probe artifact you introduced, or hand the user the exact removal command.
 Then report:
@@ -372,8 +432,9 @@ Then report:
 - what was found or changed, with values quoted verbatim (R10);
 - which window it applies to;
 - that injected changes disappear on reload/restart (R8);
-- anything left mutated — `errors` permanently patches `console.error`, and most commands cache
-  `window.__steam_debug_wr`, both until the page reloads.
+- anything left mutated — `errors` permanently patches `console.error`, most commands cache
+  `window.__steam_debug_wr`, and an interrupted `logs`/`watch` can leave
+  `window.__steam_debug_spew` registered. All clear on reload, and `doctor` reports each of them.
 
 ---
 
@@ -386,7 +447,8 @@ Load on demand; do not read them all up front.
 | `reference/commands.md` | Full flag semantics, per-command output shapes, worked examples |
 | `reference/targets.md` | Choosing a window; popup internals; routes and navigation |
 | `reference/injection.md` | Writing CSS/JS into Steam; CEF paint traps; plugin patterns |
-| `reference/troubleshooting.md` | Log sources, error-pattern tables, React error decoding |
+| `reference/troubleshooting.md` | Log sources, error-pattern tables, React error decoding, crash recovery |
+| `reference/steam-client-api.md` | Calling a `SteamClient` API the CLI does not wrap; index into `docs/steam-client/` |
 | `reference/remote.md` | Steam Deck / SteamOS over the network |
 | `reference/launch-options.md` | **Rarely.** Only when changing how Steam is launched, or hunting a capability the CLI lacks. Phase 0's four flags cover normal work |
 
@@ -427,6 +489,8 @@ Manual review — confirm each still holds:
 | 9 | Claims about what CEF paints are backed by a `screenshot`, not by `styles` | Someone documented a computed value as a visible change |
 | 10 | No command or doc has drifted into persistence or plugin loading | Scope creep — that belongs to a plugin loader, not here |
 | 11 | Anything described as a device difference was checked on **both** a desktop client and a Deck | A single-device observation was written up as a platform rule. This has caused two wrong claims already — lazily-created targets and popup layout both look like platform differences until you check |
+| 12 | No doc tells the user to relaunch Steam from a terminal to read backend output | That instruction is obsolete — `logs --source backend` reads the same stream over CDP, and it is the only way that works on a Deck |
+| 13 | `restart client` still relaunches Steam itself rather than calling `SteamClient.User.StartRestart` | Steam's own restart strips `-cef-enable-debugging`, so the client returns alive and unreachable. If someone "simplifies" this, the crash-recovery loop silently stops working |
 
 Adding a command: implement it, extend §4, add a smoke test, and re-run both suites.
 Do not document behaviour you have not observed on a running client.

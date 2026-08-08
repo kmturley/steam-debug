@@ -109,6 +109,48 @@ Verified directly on the device: `status`, `doctor`, `targets`, `page`, `stores`
 `menu`. Route names match desktop, and `navigate account` is the same no-op, correctly reported
 as `Route unchanged`.
 
+### Backend logs and restart
+
+`logs --source backend` and `console` go through `SteamClient`, which the Deck has like any other
+client — so Steam's own log stream is readable over the network with **no SSH, no password, and
+nothing installed on the device**. This is the one capability a Deck otherwise lacks entirely: on
+a desktop you could launch Steam from a terminal to see the same output, and in Game Mode you
+cannot.
+
+```bash
+node $S logs --source backend --host steamdeck --level error
+node $S console app_status 570 --host steamdeck
+```
+
+Verified on the device: `console`, `console list`, `logs --source backend`, and the
+`backendErrors` an `inject` reports. Spew is client-wide there as on desktop — a command issued
+over one connection is seen by a listener on another.
+
+`restart js --confirm` works remotely and is the right recovery step for a wedged UI. Verified:
+the context start time was replaced and the client came back ready.
+
+**`restart client` is refused over `--host`.** Relaunching Steam means starting a process on that
+machine, and Steam's own restart drops the debugging flag, so the client would come back
+unreachable with no way to fix it remotely. If a Deck's client needs a full restart, the user has
+to do it on the device.
+
+### `developer` is 0 on a Deck
+
+The Deck's CEF Remote Debugging toggle does **not** set `-dev`, so the `developer` convar reads
+`0` where a desktop launched from Phase 0 reads `1`:
+
+```bash
+node $S console developer --host steamdeck    # "developer" = "0"
+```
+
+**Error-level spew is not gated behind it.** A refused `SteamClient` call reports identically on
+both — same `RaiseJSException` text, captured by `inject` the same way. Verbose informational
+spew may be thinner on a Deck; raise it with `console developer 1` if a trail goes cold, and put
+it back afterwards.
+
+The console command table is also platform-specific — 555 entries on the Deck against 554 on
+macOS from the same Steam build. Enumerate with `console list` rather than assuming (SKILL.md R6).
+
 ---
 
 ## Developing for a Deck on a desktop

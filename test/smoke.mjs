@@ -54,6 +54,17 @@ async function runJson(...args) {
   return JSON.parse(stdout);
 }
 
+/** As runExpectingFailure, for commands that legitimately take longer than the default timeout. */
+async function runSlowExpectingFailure(...args) {
+  try {
+    const result = await runSlow(...args);
+    throw new Error(`expected a non-zero exit from "${args.join(' ')}", got 0:\n${result.stdout}`);
+  } catch (err) {
+    if (typeof err.code !== 'number') throw err;
+    return { code: err.code, stdout: err.stdout ?? '', stderr: err.stderr ?? '' };
+  }
+}
+
 /** Run a command that is expected to fail, returning its exit code and output. */
 async function runExpectingFailure(...args) {
   let result;
@@ -1134,3 +1145,185 @@ describe('page.recentPaths', () => {
       `recentPaths should be path strings, got: ${JSON.stringify(recentPaths)}`);
   });
 });
+
+describe('console — Steam\'s developer console', () => {
+  test('a real command produces backend output', async () => {
+    // `developer` is a convar read: it always answers, and the answer proves the backend
+    // channel delivered, not just that the command was accepted.
+    const result = await runJson('console', 'developer', '--json');
+    assert.equal(result.notFound, false);
+    assert.ok(result.lines.length > 0,
+      `expected backend output from "developer", got: ${JSON.stringify(result)}`);
+    assert.match(result.lines.map(l => l.text).join('\n'), /developer/,
+      'the reply should quote the convar it reported on');
+  });
+
+  test('list enumerates a plausible command table', async () => {
+    const result = JSON.parse((await runSlow('console', 'list', '--json')).stdout);
+    assert.ok(result.total > 100,
+      `expected a substantial command table, got ${result.total}`);
+    assert.equal(result.commands.length, result.matched);
+    // Self-consistency rather than a hardcoded name: whatever `console developer` just ran
+    // has to appear in the table the same build reports.
+    assert.ok(result.commands.includes('developer'),
+      'a command that runs must appear in the enumerated table');
+  });
+
+  test('list honours a pattern and --limit', async () => {
+    const all = JSON.parse((await runSlow('console', 'list', '--json')).stdout);
+    const filtered = JSON.parse((await runSlow('console', 'list', 'log', '--limit', '3', '--json')).stdout);
+    assert.ok(filtered.matched < all.total, 'a pattern must narrow the table');
+    assert.ok(filtered.matched > 0, 'expected at least one command matching /log/');
+    assert.ok(filtered.commands.length <= 3, '--limit must cap the listing');
+    assert.ok(filtered.commands.every(c => c.includes('log')),
+      `every result should match the pattern, got: ${filtered.commands}`);
+  });
+
+  test('an unknown command exits 1 rather than reading as an empty success', async () => {
+    const { code, stdout } = await runExpectingFailure('console', 'definitelynotacommand', '--json');
+    assert.equal(code, 1);
+    assert.equal(JSON.parse(stdout).notFound, true);
+  });
+
+  test('a pattern matching nothing exits 1', async () => {
+    const { code } = await runSlowExpectingFailure('console', 'list', 'zzzznotacommandzzzz');
+    assert.equal(code, 1);
+  });
+
+  test('commands that crash the client require --confirm', async () => {
+    const { code, stderr } = await runExpectingFailure('console', 'minidump_crash');
+    assert.equal(code, 2);
+    assert.match(stderr, /--confirm/);
+    assert.match(stderr, /crash/i);
+  });
+
+  test('--target is rejected: the console is client-wide', async () => {
+    const { code } = await runExpectingFailure('console', 'developer', '--target', 'BigPicture');
+    assert.equal(code, 2);
+  });
+});
+
+describe('logs --source backend', () => {
+  test('streams Steam\'s own output when something makes it talk', async () => {
+    const child = spawnCli(['logs', '--source', 'backend'], { stdio: ['ignore', 'pipe', 'ignore'] });
+    let out = '';
+    child.stdout.on('data', d => { out += d; });
+
+    try {
+      await sleep(1_500);
+      // Drive the backend from a second connection: the spew stream is client-wide, so a
+      // command issued elsewhere must still show up here.
+      await run('console', 'developer');
+      await waitFor(() => /\(backend\)/.test(out), 10_000, 'a tagged backend line');
+      assert.match(out, /\[INFO ?\] \(backend\)/,
+        `backend lines must be tagged so their origin is unambiguous, got: ${out}`);
+    } finally {
+      child.kill('SIGINT');
+    }
+  });
+
+  test('is unavailable on a target without SteamClient, and says so', async () => {
+    const { code, stderr } = await runExpectingFailure(
+      'logs', '--source', 'backend', '--target', 'BigPicture');
+    assert.equal(code, 1);
+    assert.match(stderr, /SteamClient\.Console/);
+  });
+});
+
+describe('inject surfaces backend rejections', () => {
+  const js = join(tmpdir(), `steam-debug-backend-${process.pid}.js`);
+  after(async () => {
+    try { unlinkSync(js); } catch { /* gone */ }
+    await run('inject', 'remove', 'backendprobe').catch(() => {});
+  });
+
+  test('reports a SteamClient call the backend refused', async () => {
+    // Wrong arity: the JS call returns normally and the client rejects it, which is exactly
+    // the failure mode no frontend stream records.
+    writeFileSync(js, 'SteamClient.Downloads.EnableAllDownloads(true);\nreturn () => {};\n');
+    const result = await runJson('inject', 'js', js, '--id', 'backendprobe', '--json');
+
+    assert.ok(Array.isArray(result.backendErrors), 'inject must report a backendErrors array');
+    assert.ok(result.backendErrors.length > 0,
+      'a refused SteamClient call must be reported — otherwise it fails silently');
+    assert.match(result.backendErrors.join('\n'), /EnableAllDownloads/,
+      `the report should name the method that failed, got: ${JSON.stringify(result.backendErrors)}`);
+  });
+
+  test('a clean injection reports no backend errors', async () => {
+    writeFileSync(js, 'window.__backendProbeOk = true;\nreturn () => {};\n');
+    const result = await runJson('inject', 'js', js, '--id', 'backendprobe', '--json');
+    assert.deepEqual(result.backendErrors, [],
+      'a harmless injection must not manufacture backend errors');
+  });
+});
+
+describe('restart guardrails', () => {
+  test('a missing mode exits 2', async () => {
+    const { code, stderr } = await runExpectingFailure('restart');
+    assert.equal(code, 2);
+    assert.match(stderr, /js\|client/);
+  });
+
+  test('an unknown mode exits 2', async () => {
+    const { code } = await runExpectingFailure('restart', 'everything', '--confirm');
+    assert.equal(code, 2);
+  });
+
+  test('--confirm is required for both modes', async () => {
+    for (const mode of ['js', 'client']) {
+      const { code, stderr } = await runExpectingFailure('restart', mode);
+      assert.equal(code, 2, `restart ${mode} must refuse without --confirm`);
+      assert.match(stderr, /--confirm/);
+    }
+  });
+
+  test('restart client is refused over --host', async () => {
+    // Explicit --host, so withDevice leaves it alone on both devices.
+    const { code, stderr } = await runExpectingFailure(
+      'restart', 'client', '--confirm', '--host', 'not-this-machine.invalid');
+    assert.equal(code, 2);
+    assert.match(stderr, /cannot work over --host/);
+  });
+});
+
+describe('status reports a restart fingerprint', () => {
+  test('contextStarted is a timestamp in the past', async () => {
+    const s = await runJson('status', '--json');
+    assert.ok(typeof s.contextStarted === 'string', 'status must report contextStarted');
+    const started = Date.parse(s.contextStarted);
+    assert.ok(Number.isFinite(started), `contextStarted should parse, got ${s.contextStarted}`);
+    assert.ok(started <= Date.now(), 'the context cannot have started in the future');
+    assert.ok(s.uptimeSeconds >= 0, 'uptimeSeconds should be non-negative');
+  });
+
+  test('is stable while nothing restarts', async () => {
+    const a = await runJson('status', '--json');
+    const b = await runJson('status', '--json');
+    assert.equal(a.contextStarted, b.contextStarted,
+      'contextStarted must only change when the context is actually replaced');
+  });
+});
+
+// Last on purpose: it drops every injection and rebuilds the UI context, so anything
+// running after it would be measuring a different client.
+describe('restart js', { skip: DEVICE.canLaunch ? false : 'never restarts someone else\'s device' },
+  () => {
+    test('replaces the JS context and comes back ready', async () => {
+      const before = await runJson('status', '--json');
+
+      const { stdout } = await execAsync(
+        process.execPath, [SCRIPT, ...withDevice(['restart', 'js', '--confirm', '--json'])],
+        { timeout: 120_000 });
+      const result = JSON.parse(stdout);
+
+      assert.equal(result.restarted, true, 'the UI should come back');
+      assert.equal(result.contextStartedBefore, before.contextStarted);
+      assert.notEqual(result.contextStartedAfter, result.contextStartedBefore,
+        'a restart that does not replace the context has not restarted anything');
+
+      const after = await runJson('status', '--json');
+      assert.equal(after.ready, true, 'the client must be usable again afterwards');
+      assert.equal(after.contextStarted, result.contextStartedAfter);
+    });
+  });
