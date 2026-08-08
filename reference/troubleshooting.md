@@ -86,8 +86,11 @@ node $S console log_ipc 1         # turn on IPC tracing, then read it with logs
 node $S console app_status 570    # per-app state straight from the client
 ```
 
-The command table is build-specific — enumerate it with `console list` rather than assuming a
-command exists.
+The command table is build- and platform-specific — enumerate it with `console list` rather than
+assuming a command exists.
+
+On a Steam Deck the `developer` convar reads `0`, because the CEF Remote Debugging toggle does not
+set `-dev`. Error-level spew is unaffected; see `remote.md`.
 
 ---
 
