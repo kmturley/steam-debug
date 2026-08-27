@@ -114,11 +114,48 @@ const SETTLE_INTERVAL_MS = 300;
 const SETTLE_STABLE_FRAMES = 3;
 
 /**
+ * Keys whose values are credentials or machine identity (R12).
+ *
+ * Steam's JS context reaches SteamClient.Auth, so a login token is one `eval` away from the
+ * transcript. Redaction happens here rather than in the instructions because a rule the tool
+ * enforces cannot be forgotten: the value never reaches the caller at all.
+ */
+const SECRET_KEY_PATTERN =
+  /token|secret|passwo?rd|refreshinfo|steamguard|machineid|cookie|sessionid|api[-_]?key/i;
+
+/** Set from --show-secrets, for deliberate auth debugging. */
+let SHOW_SECRETS = false;
+
+const REDACTED_PREFIX = '[redacted: ';
+
+/** Idempotent: eval redacts when building its descriptor, printJson redacts again on the way out. */
+const withheld = v =>
+  typeof v === 'string' && v.startsWith(REDACTED_PREFIX) ? v
+    : `${REDACTED_PREFIX}${typeof v === 'string' ? `string(${v.length})` : typeof v}` +
+      ' — pass --show-secrets to reveal]';
+
+/**
+ * Replace credential-shaped values with a description of what was withheld.
+ *
+ * Key-based, deliberately: matching on value shape would guess, and a wrong guess either leaks
+ * or silently mangles real output. A bare primitive returned straight from `eval` carries no key
+ * and cannot be caught here — that path is gated in cmdEval instead.
+ */
+function redact(value, seen = new WeakSet()) {
+  if (SHOW_SECRETS || value === null || typeof value !== 'object') return value;
+  if (seen.has(value)) return value;
+  seen.add(value);
+  if (Array.isArray(value)) return value.map(v => redact(v, seen));
+  return Object.fromEntries(Object.entries(value).map(
+    ([k, v]) => [k, SECRET_KEY_PATTERN.test(k) ? withheld(v) : redact(v, seen)]));
+}
+
+/**
  * Print a structured result. An object carrying a string `error` is a failed command:
  * the JSON still goes to stdout so it stays parseable, but the exit code reports failure.
  */
 function printJson(value) {
-  console.log(JSON.stringify(value, null, 2));
+  console.log(JSON.stringify(redact(value), null, 2));
   if (value && typeof value === 'object' && !Array.isArray(value) && typeof value.error === 'string') {
     process.exitCode = EXIT_FAIL;
   }
@@ -698,8 +735,13 @@ async function describeRemote(session, r) {
 
       const json = out?.result?.value;
       if (typeof json === 'string') {
-        try { return plain(r.subtype === 'array' ? 'array' : 'object', json, JSON.parse(json)); }
-        catch { return opaque('object', json); }
+        try {
+          // Redact before `text` is built, not after: `text` is what the human path prints and
+          // it bypasses printJson entirely, so redacting downstream would leak in plain output.
+          const value = redact(JSON.parse(json));
+          return plain(r.subtype === 'array' ? 'array' : 'object',
+            JSON.stringify(value, null, 2), value);
+        } catch { return opaque('object', json); }
       }
       // Circular, or a host object JSON.stringify refuses — describe it instead.
       return opaque(r.className ?? 'object',
@@ -716,7 +758,14 @@ async function cmdEval(expr, opts) {
     expr = readSourceFile(opts.file);
   }
   if (!expr) throw new UsageError('Usage: eval <expression> | eval --file <path>');
-  await withSession(opts, async (session) => {
+  // A bare token returned from Auth carries no key for redact() to match on, so the namespace
+  // is gated at the door instead (R12). Passing --show-secrets is the user asking for it.
+  if (!SHOW_SECRETS && /SteamClient\s*\.\s*Auth\b/.test(expr)) {
+    throw new UsageError(
+      'That expression reads SteamClient.Auth, which returns login tokens, Steam Guard data\n' +
+      'and the machine ID (R12). Re-run with --show-secrets if that specific value was asked for.');
+  }
+  await withSession(opts, async (session, target) => {
     const result = await session.send('Runtime.evaluate', {
       expression: expr,
       returnByValue: false,
@@ -736,6 +785,7 @@ async function cmdEval(expr, opts) {
 
     const described = await describeRemote(session, r);
     emit(opts, {
+      target: target.title,
       type: described.type,
       // `value` is absent for anything JSON cannot represent; `text` always describes it.
       ...(described.value === undefined ? {} : { value: described.value }),
@@ -861,7 +911,7 @@ async function cmdReact(opts) {
 
 async function cmdStyles(selector, opts) {
   if (!selector) throw new UsageError('Usage: styles <selector> [--target <title>]');
-  await withSession(opts, async (session) => {
+  await withSession(opts, async (session, target) => {
     const raw = await evaluate(session, `JSON.stringify((() => {
       const el = document.querySelector(${JSON.stringify(selector)});
       if (!el) return { error: 'No element matches: ' + ${JSON.stringify(selector)} };
@@ -888,7 +938,9 @@ async function cmdStyles(selector, opts) {
         cssVars,
       };
     })())`);
-    printJson(JSON.parse(raw));
+    // Target first: R3/R7 — which window answered is part of the result, not something
+    // the caller should have to remember asking for.
+    printJson({ target: target.title, ...JSON.parse(raw) });
   });
 }
 
@@ -897,7 +949,7 @@ async function cmdDom(selector, opts) {
   if (!selector) throw new UsageError('Usage: dom <selector> [--depth <n>] [--target <title>]');
   const depth = opts.depth ?? 2;
 
-  await withSession(opts, async (session) => {
+  await withSession(opts, async (session, target) => {
     const raw = await evaluate(session, `JSON.stringify((() => {
       const root = document.querySelector(${JSON.stringify(selector)});
       if (!root) return { error: 'No element matches: ' + ${JSON.stringify(selector)} };
@@ -928,9 +980,9 @@ async function cmdDom(selector, opts) {
     })())`);
 
     const tree = JSON.parse(raw);
-    if (tree.error) { printJson(tree); return; }
+    if (tree.error) { printJson({ target: target.title, ...tree }); return; }
 
-    emit(opts, tree, () => {
+    emit(opts, { target: target.title, ...tree }, () => {
       const render = (node, indent) => {
         const pad = '  '.repeat(indent);
         const cls = node.classes ? `.${node.classes.join('.')}` : '';
@@ -1207,7 +1259,7 @@ async function cmdPopups(opts) {
 
 async function cmdModule(id, opts) {
   if (!id) throw new UsageError('Usage: module <moduleId>');
-  await withSession(opts, async (session) => {
+  await withSession(opts, async (session, target) => {
     // Envelope so a missing module is distinguishable from source that happens to look
     // like an error string. Previously "Module X not found" printed to stdout and exited 0.
     const raw = await evaluate(session, `JSON.stringify((() => {
@@ -1222,12 +1274,12 @@ async function cmdModule(id, opts) {
     })())`);
     const result = JSON.parse(raw);
     if (result.error) {
-      if (opts.json) printJson({ moduleId: id, error: result.error });
+      if (opts.json) printJson({ target: target.title, moduleId: id, error: result.error });
       else console.error(result.error);
       process.exitCode = EXIT_FAIL;
       return;
     }
-    emit(opts, { moduleId: id, length: result.src.length, source: result.src },
+    emit(opts, { target: target.title, moduleId: id, length: result.src.length, source: result.src },
       () => console.log(result.src));
   });
 }
@@ -2116,10 +2168,13 @@ async function cmdInject(rest, opts) {
       for (const text of backendErrors) process.stderr.write(`  ${text}\n`);
       process.stderr.write('These may be unrelated. Confirm with: logs --source backend\n\n');
     }
-    process.stderr.write(`Remove with: inject remove ${slug}\n`);
+    // Carry --target through: without it the removal runs against SharedJSContext and silently
+    // leaves the real injection in place (R8).
+    const remove = `inject remove ${slug}${opts.target ? ` --target ${opts.target}` : ''}`;
+    process.stderr.write(`Remove with: ${remove}\n`);
     process.stderr.write('Injections do not survive a page reload or Steam restart.\n');
 
-    printJson({ id: slug, type: mode, target: target.title, backendErrors });
+    printJson({ id: slug, type: mode, target: target.title, remove, backendErrors });
   });
 }
 
@@ -2351,6 +2406,9 @@ Options:
   --timeout <ms>    Per-request CDP timeout (default: 10000)
   --json            Machine-readable stdout. Accepted by every command; 'logs' emits
                     one JSON object per line.
+  --show-secrets    Reveal credential-shaped values. By default any token, password,
+                    Steam Guard blob or machine ID in a JSON payload is replaced with
+                    a description, and 'eval' refuses to touch SteamClient.Auth.
 
 Flags are rejected by commands that do not act on them, rather than ignored.
 
@@ -2389,7 +2447,7 @@ function parseArgs(argv) {
     }
   }
 
-  const boolFlags = ['--ignore-case', '--json', '--settle', '--confirm'];
+  const boolFlags = ['--ignore-case', '--json', '--settle', '--confirm', '--show-secrets'];
   for (const flag of boolFlags) {
     const i = args.indexOf(flag);
     if (i !== -1) {
@@ -2404,6 +2462,9 @@ function parseArgs(argv) {
 
 /** Reject flag values that would otherwise fail quietly and return a plausible wrong answer. */
 function validateOpts(opts) {
+  // Module-level, because printJson redacts far from any command that knows about opts.
+  if (opts['show-secrets']) SHOW_SECRETS = true;
+
   if (opts.level !== undefined && !LOG_LEVELS.includes(opts.level.toLowerCase())) {
     throw new UsageError(
       `--level must be one of ${LOG_LEVELS.join(', ')} — got "${opts.level}".\n` +
@@ -2466,7 +2527,7 @@ function validateOpts(opts) {
 }
 
 /** Flags every command understands. Anything else must be declared per command. */
-const UNIVERSAL_FLAGS = ['port', 'host', 'timeout', 'json'];
+const UNIVERSAL_FLAGS = ['port', 'host', 'timeout', 'json', 'show-secrets'];
 
 /**
  * Emit a result: machine-readable under --json, human-readable otherwise.

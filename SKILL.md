@@ -41,15 +41,33 @@ S=~/.claude/skills/steam-debug/steam-debug.mjs
 
 Every command in this document assumes `$S` is set. Never hardcode a different path.
 
+### 0.1 Required inputs — establish before Phase 1
+
+Four facts change which commands are valid. Establish each from the user's request, or from a
+command, before acting. **Never assume a default silently**: if a fact is unstated and the
+listed fallback is wrong, the answer is wrong in a way that still looks right.
+
+| # | Input | How to establish it | Fallback if unstated |
+|---|---|---|---|
+| I1 | **Device** — desktop, a Deck, or both | The user names it, or `--host` is given | `localhost` (desktop, port 8080). A Deck is never assumed. |
+| I2 | **UI mode** — Big Picture (`-gamepadui`) or classic desktop | `status`, then `page` (exit 1 ⇒ no Big Picture window) | Whatever is running. Never relaunch to change mode without consent (R9). |
+| I3 | **Target window** | `targets`, then §5 of `reference/targets.md` | `SharedJSContext` (§2) |
+| I4 | **Task class** — inspect (read-only) or inject (mutates the client) | The user's verb | inspect. Never escalate to inject on your own initiative. |
+
+Ask the user only when a fallback would be actively misleading — a Deck-specific question with
+no `--host`, or an inject request that does not say which window. Otherwise state the assumption
+in Phase 1 and proceed.
+
 ---
 
 ## 1. Hard rules — MUST
 
 Violating any of these produces an answer that is wrong even if it looks right.
 
-**R1 — Preflight gate.** Do not run any inspect, navigate, or inject command until `status`
-has reported `Webpack bundle: ✓` **and** `Steam init done: ✓` in this session. If either is `✗`,
-go to the Failure Ladder (§6). Never skip this because Steam "looks" open.
+**R1 — Preflight gate.** Do not run any inspect, navigate, or inject command until, in this
+session, **either** `doctor` exited 0, **or** `status` reported `Webpack bundle: ✓` **and**
+`Steam init done: ✓`. Anything else → Failure Ladder (§6). Never skip this because Steam "looks"
+open, and never carry a preflight result over from an earlier session.
 
 **R2 — Closed command surface.** Only the commands and flags listed in §4 exist. Never invent a
 command, flag, subcommand, or alias, and never infer one from a pattern. If a task needs
@@ -65,9 +83,11 @@ means the command failed or found nothing; 2 means the invocation was wrong. An 
 exit 1, so "no matches" never reads as success. Commands returning JSON also print
 `{"error": "..."}` on stdout when they fail.
 
-**R5 — Verify state changes.** `navigate` verifies itself: it polls the route and exits 1 if
-nothing moved, so a no-op cannot be mistaken for success. `menu` does **not** — it reports
-success without checking. Confirm any `menu` with `page` before drawing a conclusion.
+**R5 — Verify state changes.** `navigate` and `menu` both verify themselves: each polls the
+state it changed and exits 1 if it did not move, so a no-op cannot be mistaken for success —
+trust their exit code and do not re-confirm with `page`. Nothing else self-verifies. Every other
+mutation — injection, `console`, `eval` with a side effect — needs the independent check named in
+Phase 4 before you report it worked.
 
 **R6 — Never fabricate build-specific identifiers.** Webpack module IDs, obfuscated CSS class
 names, React version, and module counts change with every Steam build. Every such value you
@@ -85,14 +105,20 @@ express it, and if you do, match its contract: a `steam-debug-<slug>` id and rem
 Always give the user the removal command, and never describe an injection as persistent — every
 one is lost on reload or restart.
 
-**R9 — Never restart or kill Steam without explicit user confirmation.** A restart drops
+**R9 — Never restart, crash, or kill Steam without explicit user confirmation.** A restart drops
 in-progress downloads, running games, and Remote Play sessions. Ask, then use `restart`, which
 requires `--confirm` and refuses while a game or download is active — never `pkill`. Prefer
 `restart js`, which reloads only the UI; escalate to `restart client` only when the client itself
 is gone or wedged. Relaunching is the last rung of the Failure Ladder, not a first response.
 
+The same consent applies to `console` commands that take the client down — `minidump_crash` and
+`minidump_assert` deliberately crash or assert Steam, and the CLI refuses them (exit 2) without
+`--confirm`. Never pass `--confirm` to either on your own initiative. Treat any console command
+you cannot describe the effect of as destructive until `console list` says otherwise.
+
 **R10 — Report observed values verbatim.** Quote real IDs, counts, selectors, and versions from
-command output. Do not round, paraphrase, or reconstruct them from memory.
+command output. Do not round, paraphrase, or reconstruct them from memory. The one exception is
+R12: credentials and personal data are redacted, never quoted.
 
 **R11 — "Nothing happened" is not a diagnosis until the backend has been read.** A `SteamClient`
 call with wrong arguments, or one the client refuses, returns cleanly to JavaScript and fails
@@ -100,6 +126,21 @@ silently in Steam's backend. Before reporting that code ran without effect, chec
 `logs --source backend` (or the `backendErrors` field `inject` already returns). Never attribute
 a failure to the frontend when you have not looked at the only stream that names the component
 that refused.
+
+**R12 — Never read out the user's credentials or personal data.** *Partly enforced by the CLI:*
+any JSON value under a credential-shaped key is replaced with `[redacted: …]` before it reaches
+you, and `eval` refuses an expression touching `SteamClient.Auth` (exit 2). `--show-secrets`
+lifts both, and passing it is a decision you make only when the user asked for that value.
+
+The rule still binds where the tool cannot see. `eval` reaches the whole `SteamClient` surface —
+`SteamClient.User`, and any auth value returned as a bare primitive, which carries no key to
+match on. Do not call an auth or account API unless the user asked for that specific thing, and
+never print a refresh token, login token, Steam Guard blob, machine ID, or password to the
+transcript: report its shape (`present`, `absent`, length, type) instead. `stores`, `page`, and
+`eval` on user state also return account
+names, friend lists, and library contents, and a `screenshot` of Big Picture captures all of it
+on screen — say so when you hand over an image, and do not paste account identifiers into a
+report that did not ask for them. This rule outranks R10.
 
 ---
 
@@ -155,10 +196,10 @@ This table is the single source of truth. It is verified against the implementat
 | `status` | — | rejected | human text | 1 — no CDP endpoint (see note) |
 | `doctor` | — | rejected | checklist | 1 — any check failed |
 | `targets` | — | rejected | human text | 1 — no CDP endpoint |
-| `eval` | `<expr>` | **yes** | value, JSON, or a `(…)` descriptor | 1 — the expression threw |
+| `eval` | `<expr>` *or* `--file <path>` | **yes** | value, JSON, or a `(…)` descriptor | 1 — the expression threw; 2 — the expression touches `SteamClient.Auth` without `--show-secrets` (R12) |
 | `errors` | — | **yes** | human text | 1 — connect failure |
 | `logs` | — | **yes** | live `[LEVEL] message` stream | 1 — the connection dropped mid-stream; 2 — invalid `--level` |
-| `console` | `<steam-command>`, `list [pattern]` | rejected | backend reply, or a command list | 1 — no such console command, or no match |
+| `console` | `<steam-command>`, `list [pattern]` | rejected | backend reply, or a command list | 1 — no such console command, or no match; 2 — `minidump_crash`/`minidump_assert` without `--confirm` (R9) |
 | `restart` | `<js\|client>` | rejected | JSON | 1 — blocked by a running game or download, or Steam did not come back; 2 — missing `--confirm` |
 | `react` | — | rejected | JSON | 1 — React not found |
 | `styles` | `<selector>` | **yes** | JSON | 1 — selector matched nothing |
@@ -166,21 +207,21 @@ This table is the single source of truth. It is verified against the implementat
 | `webpack` | `<pattern>` | rejected | human text | 1 — no matches |
 | `classes` | `<pattern>` | rejected | human text | 1 — no matches |
 | `module` | `<id>` | **yes** | raw module source | 1 — module not found |
-| `navigate` | `<page\|steam://url>` | rejected | *(stderr only)* | 1 — route did not change |
+| `navigate` | `<page\|steam://url>` | rejected | *(stderr; JSON on stdout under `--json`)* | 1 — route did not change |
 | `page` | — | rejected | JSON | 1 — no Big Picture window |
 | `popups` | — | rejected | JSON array | 1 — registry unavailable |
-| `menu` | `<QuickAccess\|MainMenu\|Close>` | rejected | *(stderr only)* | 2 — unknown menu name |
+| `menu` | `<QuickAccess\|MainMenu\|Close>` | rejected | *(stderr; JSON on stdout under `--json`)* | 1 — menu state did not change (self-verifying, R5); 2 — unknown menu name |
 | `stores` | — | rejected | JSON | 1 — no Big Picture window |
 | `screenshot` | `[selector]` | **yes** | PNG path | 1 — popup target, selector missing or zero-size, or `--diff` found no change |
 | `inject` | `<css\|js> <file>`, `list`, `remove <slug>` | **yes** | JSON | 1 — injection failed, or slug not found |
-| `watch` | `<css\|js> <file>` | **yes** | *(stderr only)* | 2 — bad mode or unreadable file |
+| `watch` | `<css\|js> <file>` | **yes** | *(stderr; JSON on stdout under `--json`)* | 1 — the CDP connection dropped mid-stream; 2 — bad mode or unreadable file |
 | `help` | — | rejected | human text | — |
 
 **Flags:** `--target <name>`, `--port <n>`, `--host <addr>`, `--timeout <ms>`, `--json`,
 `--level <all\|warn\|error>`, `--source <all\|console\|browser\|backend>`, `--grep <regex>`,
 `--limit <n>`, `--ignore-case`, `--depth <n>`, `--out <path>`, `--diff <path>`, `--settle`,
-`--file <path>`, `--id <slug>`, `--confirm`. There are no others. A flag sent to a command that
-does not act on it is rejected, not ignored, and invalid values are rejected too.
+`--file <path>`, `--id <slug>`, `--confirm`, `--show-secrets`. There are no others. A flag sent to
+a command that does not act on it is rejected, not ignored, and invalid values are rejected too.
 
 **`--json` is accepted by every command** and guarantees machine-readable stdout — prefer it over
 parsing human text. `logs` emits one JSON object per line.
@@ -194,6 +235,11 @@ change behaves the same on desktop and on a Deck; see `reference/commands.md`.
 client is its job. Branch on its `ready` field. `doctor` is the opposite: it exits 1 when
 anything is wrong, and names the remedy. `status` also reports `contextStarted` — a different
 value between two calls means the UI restarted in between, so every injection is gone.
+
+**Every `--json` payload names the window it came from.** `eval`, `styles`, `dom`, `module`,
+`errors`, `console`, `screenshot`, and `inject` all carry a `target` field holding the title of
+the window that actually answered. Quote that field rather than the `--target` you passed — they
+differ whenever a name resolved to something other than what you meant (R3, R7).
 
 **Backend logs need no terminal, no SSH and no install.** `logs --source backend` streams Steam's
 own output through `SteamClient.Console`, on desktop and on a Deck alike. It is the only stream
@@ -221,13 +267,17 @@ Values that cannot be serialised print as a descriptor rather than being flatten
 what it is", not "empty" — to get at contents, return primitives:
 `document.body.className`, `el.getBoundingClientRect().width`.
 
-**Nothing fails silently any more.** Flag validation, `navigate`, and `menu` all self-report, and
+**Nothing fails silently any more.** Flag validation, `navigate`, and `menu` all self-report
+(both `navigate` and `menu` poll the state they changed and exit 1 if it did not move — R5), and
 `screenshot --diff` turns "the CSS computed but never painted" into an exit code. The one
 judgement left to you: a diff proves *something* changed, not that it changed *correctly* — look
 at the image when the answer matters.
 
-**Streams.** `navigate` and `menu` print only to stderr; piping their stdout yields nothing.
-`logs` prints its banner to stderr and log lines to stdout, so `logs 2>/dev/null | grep …` is safe.
+**Streams.** `navigate`, `menu`, and `watch` print their human-readable result to stderr, so
+piping their stdout yields nothing — **unless you pass `--json`, which puts the result object on
+stdout like every other command.** Prefer `--json` whenever you intend to read the outcome
+programmatically. `logs` prints its banner to stderr and log lines to stdout, so
+`logs 2>/dev/null | grep …` is safe.
 
 **Always-quote `eval`.** Wrap the whole expression in single quotes so the shell cannot split it
 and so `--` inside CSS custom properties is not parsed as a flag. Object literals need parentheses:
@@ -426,6 +476,19 @@ Then re-apply the injection: **nothing survives a restart of either kind.**
 
 ### Phase 6 — Report and clean up
 
+**Definition of done.** Do not report a result until every line below is true. If one cannot be
+satisfied, say which, and say what is therefore unproven — never soften it into confidence.
+
+| # | Gate | Evidence required |
+|---|---|---|
+| D1 | Preflight passed this session | `doctor` exit 0, or `status` with both ✓ (R1) |
+| D2 | Every command you are citing exited 0 | the exit code, plus no `error` key in JSON (R4) |
+| D3 | Every build-specific value came from this session | the command output it was read from (R6) |
+| D4 | Every mutation was independently confirmed | the Phase 4 check for that action type |
+| D5 | Every **visual** claim is backed by a paint | `screenshot`, with `settled: true` if diffed |
+| D6 | Nothing was left mutated without disclosure | `doctor`, which lists injections and shims |
+| D7 | No credential or account identifier is in the report | reread the output you are about to paste (R12) |
+
 Remove every probe artifact you introduced, or hand the user the exact removal command.
 Then report:
 
@@ -474,14 +537,23 @@ registry, that the registry agrees with how each handler opens its session, that
 flag is actually parsed and every parsed flag is claimed by some command, that §4 covers every
 implemented command, and that no §4 row still documents exit 0 as a failure.
 
+It also enforces checklist item 4b in both directions, by walking the call graph from each
+handler: a command whose handler can reach `EXIT_FAIL` **must** document an exit-1 condition,
+and a row claiming exit 2 **must** have a `UsageError` behind it — either thrown by the handler
+or raised by `validateOpts` for a flag specific to that command. Universal flags do not count as
+justification; `--port` is value-checked for every command, so counting it would hand each row a
+free excuse. This is the check that would have caught the stale `menu` and `watch` rows.
+
 Manual review — confirm each still holds:
 
 | # | Check | Fails if |
 |---|---|---|
 | 1 | §4 table matches `help` output exactly | A command was added or renamed |
 | 2 | §5 exit-code table matches the constants in `steam-debug.mjs` | The 0/1/2 split changed |
-| 3 | §5 "what is still quiet" lists only genuine remaining gaps | A quiet failure was fixed, or a new one appeared |
+| 3 | §5 "Nothing fails silently any more" lists only genuine remaining gaps | A quiet failure was fixed, or a new one appeared, and the paragraph was not updated |
 | 4 | Every hard rule is checkable against real output | A rule became aspirational |
+| 4a | No §1 rule contradicts §4, §5, or Phase 4 | A command gained self-verification and only one section was updated. R5 was wrong about `menu` for exactly this reason |
+| 4b | *(automated — see above)* Every §4 row lists **all** non-zero exits the handler can set | A handler gained an `EXIT_FAIL` path and the table still shows only the usage error |
 | 5 | No build-specific ID (module id, class name, React version) appears as fact | Someone pasted a real ID into the docs |
 | 6 | Every `reference/*.md` in §8 exists and is linked | A file was renamed or orphaned |
 | 7 | Phase 0 flags match the launch table in `README.md` | The two drifted apart |
@@ -490,6 +562,7 @@ Manual review — confirm each still holds:
 | 10 | No command or doc has drifted into persistence or plugin loading | Scope creep — that belongs to a plugin loader, not here |
 | 11 | Anything described as a device difference was checked on **both** a desktop client and a Deck | A single-device observation was written up as a platform rule. This has caused two wrong claims already — lazily-created targets and popup layout both look like platform differences until you check |
 | 12 | No doc tells the user to relaunch Steam from a terminal to read backend output | That instruction is obsolete — `logs --source backend` reads the same stream over CDP, and it is the only way that works on a Deck |
+| 12a | No doc instructs `pkill` as a routine step | R9 forbids it for the agent; `README.md`'s test-setup section still names it for a human, and that split must stay explicit |
 | 13 | `restart client` still relaunches Steam itself rather than calling `SteamClient.User.StartRestart` | Steam's own restart strips `-cef-enable-debugging`, so the client returns alive and unreachable. If someone "simplifies" this, the crash-recovery loop silently stops working |
 
 Adding a command: implement it, extend §4, add a smoke test, and re-run both suites.

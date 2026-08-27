@@ -1327,3 +1327,84 @@ describe('restart js', { skip: DEVICE.canLaunch ? false : 'never restarts someon
       assert.equal(after.contextStarted, result.contextStartedAfter);
     });
   });
+
+describe('credential redaction', () => {
+  const SECRET = 'SUPERSECRETVALUE123';
+
+  test('redacts credential-shaped keys in --json output', async () => {
+    const result = await runJson('eval', `({ refresh_token: "${SECRET}", user: "kim" })`, '--json');
+    assert.ok(!JSON.stringify(result).includes(SECRET),
+      'the secret must not appear anywhere in the payload');
+    assert.match(result.value.refresh_token, /^\[redacted: string\(19\)/);
+    assert.equal(result.value.user, 'kim', 'unrelated values must survive untouched');
+  });
+
+  // Regression: redaction used to live only in printJson, but the human path prints the
+  // descriptor `text` built earlier, so a secret reached plain stdout in full.
+  test('redacts on the human path too, not just --json', async () => {
+    const { stdout } = await run('eval', `({ refresh_token: "${SECRET}" })`);
+    assert.ok(!stdout.includes(SECRET), `plain stdout leaked the secret:\n${stdout}`);
+    assert.match(stdout, /\[redacted: string\(19\)/);
+  });
+
+  // Regression: printJson redacts a descriptor eval already redacted, and reported the
+  // placeholder's own length back as if it were the secret's.
+  test('reports the original length, not the placeholder length', async () => {
+    const result = await runJson('eval', `({ refresh_token: "${SECRET}" })`, '--json');
+    assert.match(result.value.refresh_token, /string\(19\)/);
+    assert.ok(!/string\(5[0-9]\)/.test(result.value.refresh_token),
+      'double redaction must be idempotent');
+  });
+
+  test('nested and array values are walked', async () => {
+    const result = await runJson(
+      'eval', `({ a: [{ api_key: "${SECRET}" }], b: { deep: { password: 1 } } })`, '--json');
+    assert.ok(!JSON.stringify(result).includes(SECRET));
+    assert.match(result.value.b.deep.password, /^\[redacted: number/);
+  });
+
+  test('--show-secrets reveals the real value', async () => {
+    const { stdout } = await run('eval', `({ refresh_token: "${SECRET}" })`, '--show-secrets');
+    assert.ok(stdout.includes(SECRET), 'the escape hatch must actually work');
+  });
+
+  test('eval refuses SteamClient.Auth without --show-secrets', async () => {
+    const { code, stderr } = await runExpectingFailure('eval', 'SteamClient.Auth.GetRefreshInfo()');
+    assert.equal(code, 2, 'a refused namespace is a usage error, not a runtime failure');
+    assert.match(stderr, /R12/);
+  });
+
+  test('--show-secrets lifts the Auth gate', async () => {
+    const { stdout } = await run('eval', 'typeof SteamClient.Auth', '--show-secrets');
+    assert.match(stdout.trim(), /object|undefined/);
+  });
+});
+
+describe('results name the window that answered', () => {
+  test('eval, styles and dom all carry a target field', async () => {
+    for (const args of [['eval', '1 + 1'], ['styles', 'body'], ['dom', 'body', '--depth', '0']]) {
+      const result = await runJson(...args, '--json');
+      assert.equal(typeof result.target, 'string',
+        `${args[0]} must report which window answered (R3, R7)`);
+      assert.ok(result.target.length > 0);
+    }
+  });
+});
+
+describe('inject hands back a removal command that works', () => {
+  test('the printed command carries --target', async () => {
+    const file = join(tmpdir(), 'steam-debug-remove-probe.css');
+    writeFileSync(file, '.steam-debug-remove-probe { outline: 0; }');
+    try {
+      const result = await runJson('inject', 'css', file, '--target', 'BigPicture', '--json');
+      // Without --target the removal silently runs against SharedJSContext and leaves the
+      // real injection in place.
+      assert.equal(result.remove, 'inject remove steam-debug-remove-probe --target BigPicture');
+
+      const { stdout } = await run(...result.remove.split(' '));
+      assert.equal(JSON.parse(stdout).removed, true, 'the handed-back command must actually work');
+    } finally {
+      unlinkSync(file);
+    }
+  });
+});
