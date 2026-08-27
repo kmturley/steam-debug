@@ -147,9 +147,15 @@ node $S help
 | `--file <path>` | `eval` | — |
 | `--id <slug>` | `inject`, `watch` | derived from filename |
 | `--confirm` | `restart`, `console` | off |
+| `--show-secrets` | all | off |
 
 **`--json` works on every command** and guarantees machine-readable stdout, so nothing has to be
 parsed out of prose. `logs --json` emits one JSON object per line.
+
+**Credentials are redacted by default.** Any JSON value under a key that looks like a token,
+password, Steam Guard blob, machine ID or session id is replaced with a description of what was
+withheld, and `eval` refuses an expression touching `SteamClient.Auth`. Pass `--show-secrets`
+when you are deliberately debugging sign-in.
 
 **`--host` takes a list**, so any command can run against a desktop client and a Steam Deck
 together — the practical way to check a plugin behaves the same on both:

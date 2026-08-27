@@ -127,12 +127,17 @@ silently in Steam's backend. Before reporting that code ran without effect, chec
 a failure to the frontend when you have not looked at the only stream that names the component
 that refused.
 
-**R12 — Never read out the user's credentials or personal data.** `eval` reaches the whole
-`SteamClient` surface, including `SteamClient.Auth` — `GetRefreshInfo`, `GetSteamGuardData`,
-`GetMachineID`, `SetLoginToken` — and `SteamClient.User`. Do not call an auth or account API
-unless the user asked for that specific thing, and never print a refresh token, login token,
-Steam Guard blob, machine ID, or password to the transcript: report its shape (`present`,
-`absent`, length, type) instead. `stores`, `page`, and `eval` on user state also return account
+**R12 — Never read out the user's credentials or personal data.** *Partly enforced by the CLI:*
+any JSON value under a credential-shaped key is replaced with `[redacted: …]` before it reaches
+you, and `eval` refuses an expression touching `SteamClient.Auth` (exit 2). `--show-secrets`
+lifts both, and passing it is a decision you make only when the user asked for that value.
+
+The rule still binds where the tool cannot see. `eval` reaches the whole `SteamClient` surface —
+`SteamClient.User`, and any auth value returned as a bare primitive, which carries no key to
+match on. Do not call an auth or account API unless the user asked for that specific thing, and
+never print a refresh token, login token, Steam Guard blob, machine ID, or password to the
+transcript: report its shape (`present`, `absent`, length, type) instead. `stores`, `page`, and
+`eval` on user state also return account
 names, friend lists, and library contents, and a `screenshot` of Big Picture captures all of it
 on screen — say so when you hand over an image, and do not paste account identifiers into a
 report that did not ask for them. This rule outranks R10.
@@ -191,7 +196,7 @@ This table is the single source of truth. It is verified against the implementat
 | `status` | — | rejected | human text | 1 — no CDP endpoint (see note) |
 | `doctor` | — | rejected | checklist | 1 — any check failed |
 | `targets` | — | rejected | human text | 1 — no CDP endpoint |
-| `eval` | `<expr>` *or* `--file <path>` | **yes** | value, JSON, or a `(…)` descriptor | 1 — the expression threw |
+| `eval` | `<expr>` *or* `--file <path>` | **yes** | value, JSON, or a `(…)` descriptor | 1 — the expression threw; 2 — the expression touches `SteamClient.Auth` without `--show-secrets` (R12) |
 | `errors` | — | **yes** | human text | 1 — connect failure |
 | `logs` | — | **yes** | live `[LEVEL] message` stream | 1 — the connection dropped mid-stream; 2 — invalid `--level` |
 | `console` | `<steam-command>`, `list [pattern]` | rejected | backend reply, or a command list | 1 — no such console command, or no match; 2 — `minidump_crash`/`minidump_assert` without `--confirm` (R9) |
@@ -215,8 +220,8 @@ This table is the single source of truth. It is verified against the implementat
 **Flags:** `--target <name>`, `--port <n>`, `--host <addr>`, `--timeout <ms>`, `--json`,
 `--level <all\|warn\|error>`, `--source <all\|console\|browser\|backend>`, `--grep <regex>`,
 `--limit <n>`, `--ignore-case`, `--depth <n>`, `--out <path>`, `--diff <path>`, `--settle`,
-`--file <path>`, `--id <slug>`, `--confirm`. There are no others. A flag sent to a command that
-does not act on it is rejected, not ignored, and invalid values are rejected too.
+`--file <path>`, `--id <slug>`, `--confirm`, `--show-secrets`. There are no others. A flag sent to
+a command that does not act on it is rejected, not ignored, and invalid values are rejected too.
 
 **`--json` is accepted by every command** and guarantees machine-readable stdout — prefer it over
 parsing human text. `logs` emits one JSON object per line.
@@ -230,6 +235,11 @@ change behaves the same on desktop and on a Deck; see `reference/commands.md`.
 client is its job. Branch on its `ready` field. `doctor` is the opposite: it exits 1 when
 anything is wrong, and names the remedy. `status` also reports `contextStarted` — a different
 value between two calls means the UI restarted in between, so every injection is gone.
+
+**Every `--json` payload names the window it came from.** `eval`, `styles`, `dom`, `module`,
+`errors`, `console`, `screenshot`, and `inject` all carry a `target` field holding the title of
+the window that actually answered. Quote that field rather than the `--target` you passed — they
+differ whenever a name resolved to something other than what you meant (R3, R7).
 
 **Backend logs need no terminal, no SSH and no install.** `logs --source backend` streams Steam's
 own output through `SteamClient.Console`, on desktop and on a Deck alike. It is the only stream
