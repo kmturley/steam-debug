@@ -65,15 +65,73 @@ function cliFlags() {
   return [...parse(valueFlags[1]), ...parse(boolFlags[1])];
 }
 
+/** Source text of one top-level function, from its declaration to the next one. */
+function bodyOf(fnName) {
+  const start = SOURCE.indexOf(`function ${fnName}(`);
+  if (start === -1) return '';
+  const next = SOURCE.slice(start + 1).search(/\n(?:async )?function \w+\(/);
+  return SOURCE.slice(start, next === -1 ? undefined : start + 1 + next);
+}
+
+/** Every top-level function name in the implementation. */
+function allFunctionNames() {
+  return [...SOURCE.matchAll(/^(?:async )?function (\w+)\(/gm)].map(m => m[1]);
+}
+
 /** How a handler opens its CDP session: forwarding opts keeps --target, {port} drops it. */
 function handlerSessionStyle(fnName) {
-  const start = SOURCE.indexOf(`function ${fnName}(`);
-  if (start === -1) return 'none';
-  const next = SOURCE.slice(start + 1).search(/\n(?:async )?function \w+\(/);
-  const body = SOURCE.slice(start, next === -1 ? undefined : start + 1 + next);
+  const body = bodyOf(fnName);
+  if (!body) return 'none';
   if (/withSession\(\s*opts\s*,/.test(body)) return 'opts';
   if (/withSession\(\s*\{\s*port:/.test(body)) return 'port';
   return 'none';
+}
+
+/**
+ * Every function reachable from a handler, following calls to functions defined in this file.
+ *
+ * Handlers delegate — `cmdRestart` splits into `cmdRestartJs`/`cmdRestartClient`, `cmdConsole`
+ * into `cmdConsoleList` — so a failure exit is often set one level down from the entry point.
+ */
+function reachableFrom(entry) {
+  const known = new Set(allFunctionNames());
+  const seen = new Set();
+  const queue = [entry];
+  while (queue.length) {
+    const fn = queue.shift();
+    if (seen.has(fn) || !known.has(fn)) continue;
+    seen.add(fn);
+    for (const m of bodyOf(fn).matchAll(/\b(\w+)\s*\(/g)) {
+      if (known.has(m[1]) && !seen.has(m[1])) queue.push(m[1]);
+    }
+  }
+  return [...seen];
+}
+
+/**
+ * Can this command set a failure exit code?
+ *
+ * `printJson` counts: it sets EXIT_FAIL for any payload carrying an `error` key, which is how
+ * the JSON-returning commands report "found nothing" without going through the handler.
+ */
+function canExitFail(handler) {
+  return reachableFrom(handler).some(fn => /EXIT_FAIL/.test(bodyOf(fn)));
+}
+
+/** Can this command raise a usage error from its own handler (not from global flag parsing)? */
+function throwsUsageError(handler) {
+  return reachableFrom(handler).some(fn => /throw new UsageError\(/.test(bodyOf(fn)));
+}
+
+/**
+ * Flags whose values `validateOpts` rejects. These raise EXIT_USAGE before any handler runs,
+ * so a command can document an exit 2 that its own handler never throws — `logs` and `--level`.
+ */
+function globallyValidatedFlags() {
+  const body = bodyOf('validateOpts');
+  assert.ok(body, 'could not locate validateOpts in steam-debug.mjs');
+  return [...body.matchAll(/opts\.([a-z]+) !== undefined|opts\.([a-z]+)\)/g)]
+    .map(m => m[1] ?? m[2]).filter(Boolean);
 }
 
 /**
@@ -264,6 +322,35 @@ describe('SKILL.md section 4 matches the implementation', () => {
       .map(([name, cells]) => `  ${name}: "${cells.failure}"`);
     assert.deepEqual(stale, [],
       `section 4 still documents exit 0 as a failure signal:\n${stale.join('\n')}`);
+  });
+
+  // Maintenance checklist 4b. The table used to list only the usage error for `menu` and
+  // `watch` while both handlers could also set EXIT_FAIL, so R4 ("read the exit code") was
+  // being asked to work against an incomplete table.
+  test('every command that can fail documents an exit 1 condition', () => {
+    const table = skillTable();
+    const undocumented = registry()
+      .filter(r => canExitFail(r.handler))
+      .filter(r => !/\b1 —/.test(table[r.name]?.failure ?? ''))
+      .map(r => `  ${r.name}: ${r.handler} can set EXIT_FAIL, but section 4 says ` +
+        `"${table[r.name]?.failure ?? '(no row)'}"`);
+    assert.deepEqual(undocumented, [],
+      `section 4 omits a failure exit the handler can actually set:\n${undocumented.join('\n')}`);
+  });
+
+  test('every documented exit 2 has a real usage error behind it', () => {
+    const table = skillTable();
+    // Universal flags are deliberately excluded: --port and --timeout are value-checked for
+    // every command, so counting them would give each row a free excuse and make this vacuous.
+    const validated = new Set(globallyValidatedFlags().filter(f => !universalFlags().includes(f)));
+    const phantom = registry()
+      .filter(r => /\b2 —/.test(table[r.name]?.failure ?? ''))
+      // Either the handler raises it, or a flag specific to this command is value-checked.
+      .filter(r => !throwsUsageError(r.handler) && !r.flags.some(f => validated.has(f)))
+      .map(r => `  ${r.name}: section 4 claims "${table[r.name].failure}", but ${r.handler} ` +
+        'throws no UsageError and accepts no command-specific validated flag');
+    assert.deepEqual(phantom, [],
+      `section 4 documents a usage error that cannot happen:\n${phantom.join('\n')}`);
   });
 
   test('hard rule R3 names exactly the target-aware commands', () => {

@@ -527,6 +527,13 @@ registry, that the registry agrees with how each handler opens its session, that
 flag is actually parsed and every parsed flag is claimed by some command, that §4 covers every
 implemented command, and that no §4 row still documents exit 0 as a failure.
 
+It also enforces checklist item 4b in both directions, by walking the call graph from each
+handler: a command whose handler can reach `EXIT_FAIL` **must** document an exit-1 condition,
+and a row claiming exit 2 **must** have a `UsageError` behind it — either thrown by the handler
+or raised by `validateOpts` for a flag specific to that command. Universal flags do not count as
+justification; `--port` is value-checked for every command, so counting it would hand each row a
+free excuse. This is the check that would have caught the stale `menu` and `watch` rows.
+
 Manual review — confirm each still holds:
 
 | # | Check | Fails if |
@@ -536,7 +543,7 @@ Manual review — confirm each still holds:
 | 3 | §5 "Nothing fails silently any more" lists only genuine remaining gaps | A quiet failure was fixed, or a new one appeared, and the paragraph was not updated |
 | 4 | Every hard rule is checkable against real output | A rule became aspirational |
 | 4a | No §1 rule contradicts §4, §5, or Phase 4 | A command gained self-verification and only one section was updated. R5 was wrong about `menu` for exactly this reason |
-| 4b | Every §4 row lists **all** non-zero exits the handler can set | A handler gained an `EXIT_FAIL` path and the table still shows only the usage error |
+| 4b | *(automated — see above)* Every §4 row lists **all** non-zero exits the handler can set | A handler gained an `EXIT_FAIL` path and the table still shows only the usage error |
 | 5 | No build-specific ID (module id, class name, React version) appears as fact | Someone pasted a real ID into the docs |
 | 6 | Every `reference/*.md` in §8 exists and is linked | A file was renamed or orphaned |
 | 7 | Phase 0 flags match the launch table in `README.md` | The two drifted apart |
