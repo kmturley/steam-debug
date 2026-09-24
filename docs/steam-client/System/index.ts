@@ -6,7 +6,7 @@ import {Devkit} from "./Devkit";
 import {Display} from "./Display";
 import {DisplayManager} from "./DisplayManager";
 import {Dock} from "./Dock";
-import {Network} from "./network";
+import {Network} from "./Network";
 import {Perf} from "./Perf";
 import {Report} from "./Report";
 import {UI} from "./UI";

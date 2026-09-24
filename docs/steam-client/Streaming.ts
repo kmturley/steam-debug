@@ -1,5 +1,5 @@
 import { EResult, Unregisterable } from "./shared";
-import {LaunchOption} from "./App";
+import {LaunchOption} from "./Apps";
 
 export interface Streaming {
     AcceptStreamingEULA(appId: number, id: string, version: number): void;

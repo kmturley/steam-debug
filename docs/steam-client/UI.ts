@@ -1,5 +1,5 @@
 import { EUIMode, Unregisterable } from "./shared";
-import {EOSType} from "./system";
+import {EOSType} from "./System";
 
 export interface UI {
     EnsureMainWindowCreated(): void;

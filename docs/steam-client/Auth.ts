@@ -1,5 +1,5 @@
 import { EResult, JsPbMessage, OperationResponse } from "./shared";
-import {EOSType} from "./system";
+import {EOSType} from "./System";
 
 export interface Auth {
     /**
