@@ -103,7 +103,7 @@ node $S logs --level error                       # start here
 node $S status                                   # webpack loaded? init done?
 node $S eval 'document.readyState'
 node $S eval 'typeof window.webpackChunksteamui'
-node $S eval 'window.App?.BFinishedInitStageOne()'
+node $S eval 'window.App?.BFinishedInitBeforeLogin()'
 ```
 
 | Symptom | Cause |

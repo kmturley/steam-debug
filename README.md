@@ -402,7 +402,7 @@ Globals available in `SharedJSContext`:
 
 ```js
 window.webpackChunksteamui          // webpack chunk array — presence means the bundle loaded
-window.App?.BFinishedInitStageOne() // true once Steam has finished initialising
+window.App?.BFinishedInitBeforeLogin() // true once Steam has finished initialising
 window.SteamUIStore                 // MobX state: navigation, menus, windows
 window.SteamClient                  // native client API bridge
 window.g_PopupManager               // popup window registry

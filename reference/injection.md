@@ -185,7 +185,7 @@ Only from `SharedJSContext`:
 | `window.SteamUIStore` | MobX state: navigation, windows, menus, gamepad routing |
 | `window.SteamClient` | Native client API bridge |
 | `window.g_PopupManager` | Popup window registry |
-| `window.App` | `BFinishedInitStageOne()` reports init state |
+| `window.App` | `BFinishedInitBeforeLogin()` reports init state |
 
 `window.React` does not exist. React lives inside the bundle; reach it via `react` for the module
 id, then `eval 'window.__steam_debug_wr(<id>)'`.
