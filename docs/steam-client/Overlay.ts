@@ -40,7 +40,12 @@ export interface Overlay {
     RegisterForMicroTxnAuthDismiss(callback: (appId: number, microTxnId: string) => void): Unregisterable;
 
     RegisterForNotificationPositionChanged(
-        callback: (appId: number, position: ENotificationPosition, horizontalInset: number, verticalInset: number) => void,
+        callback: (
+            appId: number,
+            position: ENotificationPosition,
+            horizontalInset: number,
+            verticalInset: number,
+        ) => void,
     ): Unregisterable;
 
     /**
@@ -57,9 +62,7 @@ export interface Overlay {
      * @param callback The callback function to be called.
      * @returns an object that can be used to unregister the callback.
      */
-    RegisterForOverlayBrowserProtocols(
-        callback: (browseProtocols: OverlayBrowserProtocols) => void,
-    ): Unregisterable;
+    RegisterForOverlayBrowserProtocols(callback: (browseProtocols: OverlayBrowserProtocols) => void): Unregisterable;
 
     /**
      * Registers **the** callback function to be called when the overlay browser information changes.
@@ -73,27 +76,27 @@ export interface Overlay {
 }
 
 type OverlayRequestDialog_t =
-	| 'achievements'
-	| 'asyncnotificationsrequested'
-	| 'chat'
-	| 'community'
-	| 'friendadd'
-	| 'friendremove'
-	| 'friendrequestaccept'
-	| 'friendrequestignore'
-	| 'friendremove'
-	| 'jointrade'
-	| 'leaderboards'
-	| 'lobbyinvite'
-	| 'lobbyinviteconnectstring'
-	| 'officialgamegroup'
-	| 'requestplaytime'
-	| 'remoteplaytogether'
-	| 'remoteplaytogetherinvite'
-	| 'settings'
-	| 'stats'
-	| 'steamid'
-	| 'store';
+    | "achievements"
+    | "asyncnotificationsrequested"
+    | "chat"
+    | "community"
+    | "friendadd"
+    | "friendremove"
+    | "friendrequestaccept"
+    | "friendrequestignore"
+    | "friendremove"
+    | "jointrade"
+    | "leaderboards"
+    | "lobbyinvite"
+    | "lobbyinviteconnectstring"
+    | "officialgamegroup"
+    | "requestplaytime"
+    | "remoteplaytogether"
+    | "remoteplaytogetherinvite"
+    | "settings"
+    | "stats"
+    | "steamid"
+    | "store";
 
 // EPosition
 export enum ENotificationPosition {

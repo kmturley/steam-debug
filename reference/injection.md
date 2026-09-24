@@ -85,7 +85,7 @@ node $S inject css theme.css --target BigPicture
 node $S screenshot --target BigPicture --out after.png --diff before.png
 ```
 
-```
+```text
 Changed: 20312 of 4096000 px (0.4959%), bounding box 265x104 at 66,732
 ```
 
@@ -110,7 +110,7 @@ the panel itself.
 
 Big Picture's DOM is a stack of full-viewport elements:
 
-```
+```text
 body                     1280x800  transparent
 └ div                    1280x800  transparent
   └ div.BasicUI          1280x800  background: rgb(0, 0, 0)   ← opaque, covers everything above

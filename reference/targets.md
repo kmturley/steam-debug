@@ -84,7 +84,7 @@ node $S menu QuickAccess && node $S styles '#QuickAccess-Menu' --target QuickAcc
 Stable structural ids inside the QAM document (these are hand-written, not minified, so they
 survive builds — unlike class names):
 
-```
+```text
 #QuickAccess-NA      BasicUI root, position: absolute, top/left 0
 #QuickAccess-Menu    the panel itself, display: flex
 ```

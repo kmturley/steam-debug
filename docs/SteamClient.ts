@@ -1,4 +1,4 @@
-import {SteamClient} from "./steam-client";
+import { SteamClient } from "./steam-client";
 export * from "./steam-client/shared";
 
 declare global {

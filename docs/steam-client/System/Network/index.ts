@@ -1,5 +1,5 @@
 import { JsPbMessage, OperationResponse, Unregisterable } from "../../shared";
-import {Device} from "./Device";
+import { Device } from "./Device";
 
 export interface Network {
     Device: Device;

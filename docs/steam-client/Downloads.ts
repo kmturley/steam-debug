@@ -1,5 +1,5 @@
 import { Unregisterable } from "./shared";
-import {EAppUpdateError} from "./Apps";
+import { EAppUpdateError } from "./Apps";
 
 /**
  * Represents functions related to managing downloads in Steam.
@@ -36,9 +36,7 @@ export interface Downloads {
      * @param callback The callback function to be called.
      * @returns an object that can be used to unregister the callback.
      */
-    RegisterForDownloadItems(
-        callback: (isDownloading: boolean, downloadItems: DownloadItem[]) => void,
-    ): Unregisterable;
+    RegisterForDownloadItems(callback: (isDownloading: boolean, downloadItems: DownloadItem[]) => void): Unregisterable;
 
     /**
      * Registers a callback function to be called when download overview changes.
@@ -160,7 +158,7 @@ export interface DownloadOverview {
     update_seconds_remaining: number;
     /** Time current update started */
     update_start_time: number;
-    update_state: 'None' | 'Starting' | 'Updating' | 'Stopping';
+    update_state: "None" | "Starting" | "Updating" | "Stopping";
 }
 
 export interface UpdateTypeInfo {

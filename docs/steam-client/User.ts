@@ -78,7 +78,7 @@ export interface User {
              * @todo name is from CLoginStore, but it's always empty, unused ?
              */
             emailDomain: string,
-        ) => void
+        ) => void,
     ): Unregisterable;
 
     RegisterForPrepareForSystemSuspendProgress(callback: (progress: SuspendProgress) => void): Unregisterable;
@@ -93,7 +93,9 @@ export interface User {
      */
     RegisterForShutdownDone(callback: (state: EShutdownStep, appid: number, param2: boolean) => void): Unregisterable;
 
-    RegisterForShutdownFailed(callback: (state: EShutdownStep, appid: number, success: boolean) => void): Unregisterable;
+    RegisterForShutdownFailed(
+        callback: (state: EShutdownStep, appid: number, success: boolean) => void,
+    ): Unregisterable;
 
     /**
      * Register a function to be executed when Steam starts shutting down.
@@ -105,7 +107,9 @@ export interface User {
      * Register a function to be executed when shutdown state changes.
      * @param callback The function to be executed on change.
      */
-    RegisterForShutdownState(callback: (state: EShutdownStep, appid: number, allowForceQuit: boolean) => void): Unregisterable;
+    RegisterForShutdownState(
+        callback: (state: EShutdownStep, appid: number, allowForceQuit: boolean) => void,
+    ): Unregisterable;
 
     /**
      * Removes an account from remembered users.
@@ -216,25 +220,25 @@ export enum ELoginState {
 }
 
 export enum EShutdownStep {
-  None,
-  Start,
-  WaitForGames,
-  WaitForCloud,
-  FinishingDownload,
-  WaitForDownload,
-  WaitForServiceApps,
-  WaitForLogOff,
-  Done,
-  // TODO: RegisterForShutdownDone outputs 9 here
+    None,
+    Start,
+    WaitForGames,
+    WaitForCloud,
+    FinishingDownload,
+    WaitForDownload,
+    WaitForServiceApps,
+    WaitForLogOff,
+    Done,
+    // TODO: RegisterForShutdownDone outputs 9 here
 }
 
 export enum ESuspendResumeProgressState {
-  Invalid,
-  Complete,
-  CloudSync,
-  LoggingIn,
-  WaitingForApp,
-  Working,
+    Invalid,
+    Complete,
+    CloudSync,
+    LoggingIn,
+    WaitingForApp,
+    Working,
 }
 
 export interface LoginUser {
@@ -246,13 +250,13 @@ export interface LoginUser {
 }
 
 export interface ResumeSuspendedGamesResult {
-  nAppIDPlayingElsewhere: number;
-  result: EResult;
+    nAppIDPlayingElsewhere: number;
+    result: EResult;
 }
 
 export interface SuspendProgress {
-  bGameSuspended: boolean;
-  state: ESuspendResumeProgressState;
+    bGameSuspended: boolean;
+    state: ESuspendResumeProgressState;
 }
 
 export interface SurveyEntry {

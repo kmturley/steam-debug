@@ -1,5 +1,5 @@
 import { Unregisterable } from "./shared";
-import {EAppUpdateError} from "./Apps";
+import { EAppUpdateError } from "./Apps";
 
 /**
  * Represents functions related to Steam Install Folders.

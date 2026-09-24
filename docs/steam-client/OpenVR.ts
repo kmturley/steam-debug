@@ -1,6 +1,5 @@
 import { Unregisterable } from "./shared";
 
-
 export interface OpenVR {
     Device: VRDevice;
     DeviceProperties: DeviceProperties;
@@ -25,9 +24,13 @@ export interface OpenVR {
 
     RegisterForInstallDialog: Unregisterable;
 
-    RegisterForStartupErrors(callback: (clientError: any, initError: any, initErrorString: string) => void): Unregisterable;
+    RegisterForStartupErrors(
+        callback: (clientError: any, initError: any, initErrorString: string) => void,
+    ): Unregisterable;
 
-    RegisterForVRHardwareDetected(callback: (m_bHMDPresent: any, m_bHMDHardwareDetected: any, m_strHMDName: any) => void): Unregisterable;
+    RegisterForVRHardwareDetected(
+        callback: (m_bHMDPresent: any, m_bHMDHardwareDetected: any, m_strHMDName: any) => void,
+    ): Unregisterable;
 
     RegisterForVRModeChange(callback: (m_bIsVRRunning: boolean) => void): Unregisterable;
 
@@ -63,7 +66,9 @@ export interface Keyboard {
     /**
      * {@link EKeyboardFlags} could be useful here
      */
-    RegisterForStatus(callback: (m_bIsKeyboardOpen: boolean, m_eKeyboardFlags: number, m_sInitialKeyboardText: string) => void): Unregisterable;
+    RegisterForStatus(
+        callback: (m_bIsKeyboardOpen: boolean, m_eKeyboardFlags: number, m_sInitialKeyboardText: string) => void,
+    ): Unregisterable;
 
     SendDone(): any;
 

@@ -175,7 +175,7 @@ so captures do not overwrite, and the exit code is 0 only if every device succee
 
 Three streams, not one. `logs` reads all of them and tags each line with where it came from:
 
-```
+```text
 [ERROR] Uncaught TypeError: …                  console — page JavaScript
 [ERROR] (theme.css) Failed to load resource    browser — CEF
 [ERROR] (backend) RaiseJSException: …          backend — Steam itself

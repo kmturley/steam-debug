@@ -24,7 +24,6 @@ export interface Updates {
     SelectOSBranch(base64: string): Promise<OperationResponse>;
 }
 
-
 export interface OSBranch {
     eBranch: EOSBranch; // 1 - Stable
     sRawName: string;

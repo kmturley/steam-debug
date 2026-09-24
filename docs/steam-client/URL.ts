@@ -171,4 +171,4 @@ export interface SteamURL {
 
 export type SteamURLs = {
     [url in SteamWebURL_t]: SteamURL;
-}
+};

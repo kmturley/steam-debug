@@ -1,6 +1,6 @@
 import type { EResult, JsPbMessage, OperationResponse, Unregisterable, VDFBoolean_t } from "./shared";
 import type { EControllerRumbleSetting, EThirdPartyControllerConfiguration } from "./Input";
-import {EUCMFilePrivacyState, Screenshot} from "./Screenshots";
+import { EUCMFilePrivacyState, Screenshot } from "./Screenshots";
 
 /**
  * Represents various functions related to Steam applications.
@@ -163,7 +163,7 @@ export interface Apps {
      */
     GetDownloadedWorkshopItems(appId: number): Promise<WorkshopItem[]>;
 
-    GetDurationControlInfo(appId: number): Promise<{ bApplicable: boolean; }>;
+    GetDurationControlInfo(appId: number): Promise<{ bApplicable: boolean }>;
 
     /**
      * Retrieves achievement information for a specific application for a given friend.
@@ -191,11 +191,7 @@ export interface Apps {
 
     GetGameActionForApp(
         appId: string,
-        callback: (
-            gameActionId: number,
-            appId: 0 | string,
-            taskName: AppAction_t,
-        ) => void,
+        callback: (gameActionId: number, appId: 0 | string, taskName: AppAction_t) => void,
     ): void;
 
     /**
@@ -286,7 +282,10 @@ export interface Apps {
      */
     GetSubscribedWorkshopItems(appId: number): Promise<WorkshopItem[]>;
 
-    InstallFlatpakAppAndCreateShortcut(appName: string, appCommandLineOptions: string): Promise<{
+    InstallFlatpakAppAndCreateShortcut(
+        appName: string,
+        appCommandLineOptions: string,
+    ): Promise<{
         appid: number;
         strInstallOutput: string;
     }>;
@@ -394,7 +393,7 @@ export interface Apps {
              */
             error: string,
             param4: string,
-        ) => void
+        ) => void,
     ): Unregisterable;
 
     /**
@@ -564,7 +563,12 @@ export interface Apps {
      * @param assetType The type of artwork to set.
      * @returns A Promise that resolves after the custom artwork is set.
      */
-    SetCustomArtworkForApp(appId: number, base64: string, imageType: 'jpg' | 'png', assetType: ELibraryAssetType): Promise<void>;
+    SetCustomArtworkForApp(
+        appId: number,
+        base64: string,
+        imageType: "jpg" | "png",
+        assetType: ELibraryAssetType,
+    ): Promise<void>;
 
     /**
      * Sets a custom logo position for a specific app.
@@ -738,7 +742,7 @@ export interface Apps {
      * Verifies the integrity of an app's files.
      * @param appId The ID of the app to verify.
      */
-    VerifyApp(appId: number): Promise<{ nGameActionID: number; }>;
+    VerifyApp(appId: number): Promise<{ nGameActionID: number }>;
 }
 
 export enum ELibraryAssetType {
@@ -821,7 +825,7 @@ export type LaunchAppTask_t =
     | "SiteLicenseSeatCheckout"
     | "DelayLaunch"
     | "CreatingProcess"
-    | "WaitingGameWindow"
+    | "WaitingGameWindow";
 
 export interface GameAction {
     nGameActionID: number;
@@ -850,7 +854,6 @@ export interface CompatibilityTool {
     /** Display name of the compatibility tool. */
     strDisplayName: string;
 }
-
 
 /**
  * Represents details about a single screenshot upload.
@@ -893,10 +896,10 @@ export interface ScreenshotUploadsDetails {
 }
 
 interface InstalledWorkshopItem {
-  appid: number;
-  legacy_content: string;
-  manifestid: string;
-  publishedfileid: string;
+    appid: number;
+    legacy_content: string;
+    manifestid: string;
+    publishedfileid: string;
 }
 
 export interface WorkshopItem {
@@ -946,7 +949,6 @@ export interface PrePurchaseInfo {
     apps: PrePurchaseApp[];
     lastChangeNumber: number;
 }
-
 
 export enum EAppReleaseState {
     Unknown,
@@ -1072,7 +1074,6 @@ export interface AppBackupStatus {
     strTotalBytesWritten: string;
 }
 
-
 export enum EAppUpdateError {
     None,
     Unspecified,
@@ -1142,7 +1143,7 @@ export enum ESteamInputController {
     NintendoSwitch = 1 << 3,
 }
 
-type AppPlatform_t = 'windows' | 'osx' | 'linux';
+type AppPlatform_t = "windows" | "osx" | "linux";
 
 export interface AppDetails {
     achievements: AppAchievements;
@@ -1249,73 +1250,73 @@ export interface AppDetails {
 }
 
 interface AppAssociation {
-  strName: string;
-  strURL: string;
+    strName: string;
+    strURL: string;
 }
 
 export interface AppAssociations {
-  rgDevelopers: AppAssociation[];
-  rgFranchises: AppAssociation[];
-  rgPublishers: AppAssociation[];
+    rgDevelopers: AppAssociation[];
+    rgFranchises: AppAssociation[];
+    rgPublishers: AppAssociation[];
 }
 
 export interface BadgeCard {
-  nOwned: number;
-  strArtworkURL: string;
-  strImgURL: string;
-  strMarketHash: string;
-  strName: string;
-  strTitle: string;
+    nOwned: number;
+    strArtworkURL: string;
+    strImgURL: string;
+    strMarketHash: string;
+    strName: string;
+    strTitle: string;
 }
 
 export interface Badge {
-  bMaxed: VDFBoolean_t;
-  dtNextRetry: number | null;
-  nLevel: number;
-  nMaxLevel: number;
-  nNextLevelXP: number;
-  nXP: number;
-  rgCards: BadgeCard[];
-  strIconURL: string;
-  strName: string;
-  strNextLevelName: string;
+    bMaxed: VDFBoolean_t;
+    dtNextRetry: number | null;
+    nLevel: number;
+    nMaxLevel: number;
+    nNextLevelXP: number;
+    nXP: number;
+    rgCards: BadgeCard[];
+    strIconURL: string;
+    strName: string;
+    strNextLevelName: string;
 }
 
 interface AppDescription {
-  /**
-   * Full app description. Note that it uses BB code and so must be rendered.
-   */
-  strFullDescription: string;
+    /**
+     * Full app description. Note that it uses BB code and so must be rendered.
+     */
+    strFullDescription: string;
 
-  /**
-   * Short game description.
-   */
-  strSnippet: string;
+    /**
+     * Short game description.
+     */
+    strSnippet: string;
 }
 
 interface CachedAppDetailMap {
-  /**
-   * Stringified JSON data of achievements.
-   */
-  achievementmap: string;
-  achievements: AppAchievements;
-  associations: AppAssociations;
-  badge: Badge;
-  descriptions: AppDescription;
-  gameactivity: any[];
-  /**
-   * Each string is a base64 encoded binary data.
-   */
-  usernews: string[];
-  workshop_trendy_items: any;
+    /**
+     * Stringified JSON data of achievements.
+     */
+    achievementmap: string;
+    achievements: AppAchievements;
+    associations: AppAssociations;
+    badge: Badge;
+    descriptions: AppDescription;
+    gameactivity: any[];
+    /**
+     * Each string is a base64 encoded binary data.
+     */
+    usernews: string[];
+    workshop_trendy_items: any;
 }
 
 export type CachedAppDetails = {
-  [K in keyof CachedAppDetailMap]: {
-    version: number;
-    data: CachedAppDetailMap[K];
-  };
-}
+    [K in keyof CachedAppDetailMap]: {
+        version: number;
+        data: CachedAppDetailMap[K];
+    };
+};
 
 export interface AppDeckDerivedProperties {
     gamescope_frame_limiter_not_supported?: boolean;
@@ -1489,7 +1490,7 @@ export interface LogoPosition {
     nHeightPct: number;
 }
 
-export type LogoPinPosition_t = 'BottomLeft' | 'UpperLeft' | 'CenterCenter' | 'UpperCenter' | 'BottomCenter';
+export type LogoPinPosition_t = "BottomLeft" | "UpperLeft" | "CenterCenter" | "UpperCenter" | "BottomCenter";
 
 export enum ELaunchSource {
     None,
@@ -1588,12 +1589,12 @@ export enum ECloudPendingRemoteOperation {
 }
 
 export interface CCloud_PendingRemoteOperation {
-	operation(): ECloudPendingRemoteOperation;
-	machine_name(): string;
-	client_id(): number;
-	time_last_updated(): number;
-	os_type(): number;
-	device_type(): number;
+    operation(): ECloudPendingRemoteOperation;
+    machine_name(): string;
+    client_id(): number;
+    time_last_updated(): number;
+    os_type(): number;
+    device_type(): number;
 }
 
 export interface CMsgCloudPendingRemoteOperations extends JsPbMessage {

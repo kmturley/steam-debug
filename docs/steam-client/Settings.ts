@@ -1,4 +1,4 @@
-import {CompatibilityTool as CompatibilityTool} from "./Apps";
+import { CompatibilityTool as CompatibilityTool } from "./Apps";
 import { JsPbMessage, OperationResponse, Unregisterable } from "./shared";
 
 export interface Settings {
@@ -243,8 +243,6 @@ export enum EClientBetaState {
     InBeta,
     InBetaNonAdmin,
 }
-
-
 
 /**
  * CMsgMonitorInfo

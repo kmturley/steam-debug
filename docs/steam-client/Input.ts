@@ -46,7 +46,14 @@ export interface Input {
 
     EndControllerDeviceSupportFlow(): any;
 
-    ExportCurrentControllerConfiguration(controllerIndex: number, appId: number, param2: number, title: string, description: string, param5: string): Promise<any>;
+    ExportCurrentControllerConfiguration(
+        controllerIndex: number,
+        appId: number,
+        param2: number,
+        title: string,
+        description: string,
+        param5: string,
+    ): Promise<any>;
 
     ForceConfiguratorFocus(param0: boolean): any;
 
@@ -93,24 +100,18 @@ export interface Input {
 
     RegisterForControllerAccountChanges: Unregisterable;
 
-    RegisterForControllerAnalogInputMessages(
-        callback: (msgs: ControllerAnalogInputMessage[]) => void,
-    ): Unregisterable;
+    RegisterForControllerAnalogInputMessages(callback: (msgs: ControllerAnalogInputMessage[]) => void): Unregisterable;
 
     RegisterForControllerBatteryChanges(callback: any): Unregisterable;
 
-    RegisterForControllerCommandMessages(
-        callback: (msg: ControllerCommandMessage) => void,
-    ): Unregisterable;
+    RegisterForControllerCommandMessages(callback: (msg: ControllerCommandMessage) => void): Unregisterable;
 
     /**
      * Registers a callback for changes in controller configuration cloud state.
      * @param callback The callback function for config cloud state changes.
      * @returns an object that can be used to unregister the callback.
      */
-    RegisterForControllerConfigCloudStateChanges(
-        callback: (state: ControllerConfigCloudState) => void,
-    ): Unregisterable;
+    RegisterForControllerConfigCloudStateChanges(callback: (state: ControllerConfigCloudState) => void): Unregisterable;
 
     /**
      * Registers a callback for receiving controller configuration info messages (controller layouts query, personal controller layout query).
@@ -119,9 +120,7 @@ export interface Input {
      * @remarks Do Not Use, this will break the controller layout selection unless you know what you are doing.
      */
     RegisterForControllerConfigInfoMessages(
-        callback: (
-            msgs: ControllerConfigInfoMessageList[] | ControllerConfigInfoMessageQuery[],
-        ) => void,
+        callback: (msgs: ControllerConfigInfoMessageList[] | ControllerConfigInfoMessageQuery[]) => void,
     ): Unregisterable;
 
     /**
@@ -130,7 +129,11 @@ export interface Input {
      * @returns an object that can be used to unregister the callback.
      */
     RegisterForControllerInputMessages(
-        callback: (controllerIndex: number, gamepadButton: ControllerInputGamepadButton, isButtonPressed: boolean) => void,
+        callback: (
+            controllerIndex: number,
+            gamepadButton: ControllerInputGamepadButton,
+            isButtonPressed: boolean,
+        ) => void,
     ): Unregisterable;
 
     RegisterForControllerListChanges(callback: (controllerListChanges: ControllerInfo[]) => void): Unregisterable;
@@ -140,9 +143,7 @@ export interface Input {
      * @param callback The callback function for controller state changes.
      * @returns an object that can be used to unregister the callback.
      */
-    RegisterForControllerStateChanges(
-        callback: (changes: ControllerStateChange[]) => void,
-    ): Unregisterable;
+    RegisterForControllerStateChanges(callback: (changes: ControllerStateChange[]) => void): Unregisterable;
 
     RegisterForDualSenseUpdateNotification(callback: (m_strDualSenseUpdateProduct: string) => void): Unregisterable;
 
@@ -256,7 +257,7 @@ export interface Input {
 
     SetCursorActionset(param0: boolean): any;
 
-    SetDualSenseUpdateNotification(param0: boolean): any
+    SetDualSenseUpdateNotification(param0: boolean): any;
 
     /*
             SetEditingConfigurationValue(e, t, n, o) {
@@ -309,7 +310,11 @@ export interface Input {
 
     SetSteamControllerDonglePairingMode(bEnable: boolean, bSilent: boolean): any;
 
-    SetVirtualMenuKeySelected(unControllerIndex: number, unMenuIndex: number, m_controllerMenuActiveMenuItem: number): any; //
+    SetVirtualMenuKeySelected(
+        unControllerIndex: number,
+        unMenuIndex: number,
+        m_controllerMenuActiveMenuItem: number,
+    ): any; //
     SetWebBrowserActionset(param0: boolean): any;
 
     SetXboxDriverInstallState(param0: any): any; // state
@@ -338,7 +343,10 @@ export interface Input {
                             }
                         ))
      */
-    StartEditingControllerConfigurationForAppIDAndControllerIndex(m_appId: number, m_unControllerIndex: number): Promise<any>;
+    StartEditingControllerConfigurationForAppIDAndControllerIndex(
+        m_appId: number,
+        m_unControllerIndex: number,
+    ): Promise<any>;
 
     StartGyroSWCalibration(callback: () => void): any;
 
@@ -611,7 +619,7 @@ export enum ControllerInputGamepadButton {
     GAMEPAD_ANALOG_SCROLL = 47,
     GAMEPAD_ANALOG_LEFT_KEYBOARD_CURSOR = 48,
     GAMEPAD_ANALOG_RIGHT_KEYBOARD_CURSOR = 49,
-    GAMEPAD_ANALOG_LAST = 50
+    GAMEPAD_ANALOG_LAST = 50,
 }
 
 // TODO: Not the actual name, but the enum is only represented in a dropdown

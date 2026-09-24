@@ -62,7 +62,9 @@ export interface Audio {
      * @param callback The callback function to be called.
      * @returns an object that can be used to unregister the callback.
      */
-    RegisterForDeviceVolumeChanged(callback: (audioDeviceId: number, audioType: number, volume: number) => void): Unregisterable;
+    RegisterForDeviceVolumeChanged(
+        callback: (audioDeviceId: number, audioType: number, volume: number) => void,
+    ): Unregisterable;
 
     RegisterForServiceConnectionStateChanges(callback: (param0: any) => void): Unregisterable;
 

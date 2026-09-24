@@ -1,4 +1,4 @@
-import {EControllerType} from "./Input";
+import { EControllerType } from "./Input";
 import { EParentalFeature } from "./Parental";
 import { EResult, Unregisterable } from "./shared";
 
@@ -57,9 +57,7 @@ export interface RemotePlay {
      */
     RegisterForBitrateOverride: Unregisterable;
     RegisterForClearControllers(callback: () => void): Unregisterable;
-    RegisterForControllerIndexSet(
-      callback: (steamid: string, slot: number, guestid: number) => void
-    ): Unregisterable;
+    RegisterForControllerIndexSet(callback: (steamid: string, slot: number, guestid: number) => void): Unregisterable;
 
     RegisterForDevicesChanges(callback: (devices: RemotePlayDevice[]) => void): Unregisterable;
 
@@ -73,11 +71,7 @@ export interface RemotePlay {
     ): Unregisterable; // only fires on host
 
     RegisterForInviteResult(
-      callback: (
-        steamId: string,
-        param1: any,
-        result: ERemoteClientLaunch,
-      ) => void
+        callback: (steamId: string, param1: any, result: ERemoteClientLaunch) => void,
     ): Unregisterable;
 
     RegisterForNetworkUtilizationUpdate(
@@ -87,7 +81,7 @@ export interface RemotePlay {
     RegisterForPlaceholderStateChanged(callback: (isShowingPlaceholder: boolean) => void): Unregisterable;
 
     RegisterForPlayerInputSettingsChanged(
-      callback: (steamId: string, settings: RemotePlayInputSettings, guestId: number) => void
+        callback: (steamId: string, settings: RemotePlayInputSettings, guestId: number) => void,
     ): Unregisterable;
 
     RegisterForQualityOverride(callback: (hostStreamingQualityOverride: number) => void): Unregisterable;
@@ -106,7 +100,9 @@ export interface RemotePlay {
 
     RegisterForRestrictedSessionChanges(callback: (restrictedSession: boolean) => void): Unregisterable;
 
-    RegisterForSessionStopped(callback: (steam64Id: string, guestId: number, avatarHash: string) => void): Unregisterable;
+    RegisterForSessionStopped(
+        callback: (steam64Id: string, guestId: number, avatarHash: string) => void,
+    ): Unregisterable;
 
     RegisterForSessionStarted(callback: (steam64Id: string, gameId: string, guestId: number) => void): Unregisterable;
 
@@ -142,7 +138,7 @@ export interface RemotePlay {
      * @param base64 Serialized base64 message from {@link StreamingClientConfig}.
      */
     SetStreamingClientConfig(base64: string, sessionId: number): void;
-  
+
     /**
      * Enables advanced client options.
      */
@@ -193,9 +189,9 @@ export interface RemotePlayDevice {
 }
 
 interface RemotePlayInputSettings {
-  bKeyboardEnabled: true;
-  bMouseEnabled: true;
-  bControllerEnabled: true;
+    bKeyboardEnabled: true;
+    bMouseEnabled: true;
+    bControllerEnabled: true;
 }
 
 export interface RemotePlaySettings {
@@ -224,113 +220,113 @@ export interface RemotePlaySettings {
 }
 
 export interface StreamingClientConfig {
-  quality?: EStreamQualityPreference;
-  desired_resolution_x?: number;
-  desired_resolution_y?: number;
-  desired_framerate_numerator?: number;
-  desired_framerate_denominator?: number;
-  desired_bitrate_kbps?: number;
-  enable_hardware_decoding?: boolean;
-  enable_performance_overlay?: boolean;
-  enable_video_streaming?: boolean;
-  enable_audio_streaming?: boolean;
-  enable_input_streaming?: boolean;
-  audio_channels?: number;
-  enable_video_hevc?: boolean;
-  enable_performance_icons?: boolean;
-  enable_microphone_streaming?: boolean;
-  controller_overlay_hotkey?: string;
-  enable_touch_controller_OBSOLETE?: boolean;
-  p2p_scope?: EStreamP2PScope;
-  enable_audio_uncompressed?: boolean;
-  display_limit?: StreamVideoLimit;
-  quality_limit?: StreamVideoLimit;
-  runtime_limit?: StreamVideoLimit;
-  decoder_limit: StreamVideoLimit[];
+    quality?: EStreamQualityPreference;
+    desired_resolution_x?: number;
+    desired_resolution_y?: number;
+    desired_framerate_numerator?: number;
+    desired_framerate_denominator?: number;
+    desired_bitrate_kbps?: number;
+    enable_hardware_decoding?: boolean;
+    enable_performance_overlay?: boolean;
+    enable_video_streaming?: boolean;
+    enable_audio_streaming?: boolean;
+    enable_input_streaming?: boolean;
+    audio_channels?: number;
+    enable_video_hevc?: boolean;
+    enable_performance_icons?: boolean;
+    enable_microphone_streaming?: boolean;
+    controller_overlay_hotkey?: string;
+    enable_touch_controller_OBSOLETE?: boolean;
+    p2p_scope?: EStreamP2PScope;
+    enable_audio_uncompressed?: boolean;
+    display_limit?: StreamVideoLimit;
+    quality_limit?: StreamVideoLimit;
+    runtime_limit?: StreamVideoLimit;
+    decoder_limit: StreamVideoLimit[];
 }
 
 export interface StreamingServerConfig {
-  change_desktop_resolution?: boolean;
-  dynamically_adjust_resolution_OBSOLETE?: boolean;
-  enable_capture_nvfbc?: boolean;
-  enable_hardware_encoding_nvidia_OBSOLETE?: boolean;
-  enable_hardware_encoding_amd_OBSOLETE?: boolean;
-  enable_hardware_encoding_intel_OBSOLETE?: boolean;
-  software_encoding_threads?: number;
-  enable_traffic_priority?: boolean;
-  host_play_audio?: EStreamHostPlayAudioPreference;
-  enable_hardware_encoding?: boolean;
+    change_desktop_resolution?: boolean;
+    dynamically_adjust_resolution_OBSOLETE?: boolean;
+    enable_capture_nvfbc?: boolean;
+    enable_hardware_encoding_nvidia_OBSOLETE?: boolean;
+    enable_hardware_encoding_amd_OBSOLETE?: boolean;
+    enable_hardware_encoding_intel_OBSOLETE?: boolean;
+    software_encoding_threads?: number;
+    enable_traffic_priority?: boolean;
+    host_play_audio?: EStreamHostPlayAudioPreference;
+    enable_hardware_encoding?: boolean;
 }
 
 export interface StreamVideoLimit {
-  codec?: EStreamVideoCodec;
-  mode?: StreamVideoMode;
-  bitrate_kbps?: number;
-  burst_bitrate_kbps?: number;
+    codec?: EStreamVideoCodec;
+    mode?: StreamVideoMode;
+    bitrate_kbps?: number;
+    burst_bitrate_kbps?: number;
 }
 
 export interface StreamVideoMode {
-  width?: number;
-  height?: number;
-  refresh_rate?: number;
-  refresh_rate_numerator?: number;
-  refresh_rate_denominator?: number;
+    width?: number;
+    height?: number;
+    refresh_rate?: number;
+    refresh_rate_numerator?: number;
+    refresh_rate_denominator?: number;
 }
 
 export enum ERemoteClientLaunch {
-  OK = 1,
-  Fail,
-  RequiresUI,
-  RequiresLaunchOption,
-  RequiresEULA,
-  Timeout,
-  StreamTimeout,
-  StreamClientFail,
-  OtherGameRunning,
-  DownloadStarted,
-  DownloadNoSpace,
-  DownloadFiltered,
-  DownloadRequiresUI,
-  AccessDenied,
-  NetworkError,
-  Progress,
-  ParentalUnlockFailed,
-  ScreenLocked,
-  Unsupported,
-  DisabledLocal,
-  DisabledRemote,
-  Broadcasting,
-  Busy,
-  DriversNotInstalled,
-  TransportUnavailable,
-  Canceled,
-  Invisible,
-  RestrictedCountry,
-  Unauthorized,
+    OK = 1,
+    Fail,
+    RequiresUI,
+    RequiresLaunchOption,
+    RequiresEULA,
+    Timeout,
+    StreamTimeout,
+    StreamClientFail,
+    OtherGameRunning,
+    DownloadStarted,
+    DownloadNoSpace,
+    DownloadFiltered,
+    DownloadRequiresUI,
+    AccessDenied,
+    NetworkError,
+    Progress,
+    ParentalUnlockFailed,
+    ScreenLocked,
+    Unsupported,
+    DisabledLocal,
+    DisabledRemote,
+    Broadcasting,
+    Busy,
+    DriversNotInstalled,
+    TransportUnavailable,
+    Canceled,
+    Invisible,
+    RestrictedCountry,
+    Unauthorized,
 }
 
 export enum EStreamVideoCodec {
-  None,
-  Raw,
-  VP8,
-  VP9,
-  H264,
-  HEVC,
-  ORBX1,
-  ORBX2,
-  AV1,
+    None,
+    Raw,
+    VP8,
+    VP9,
+    H264,
+    HEVC,
+    ORBX1,
+    ORBX2,
+    AV1,
 }
 
 export enum EStreamHostPlayAudioPreference {
-  Default,
-  Always,
+    Default,
+    Always,
 }
 
 export enum EStreamQualityPreference {
-  Automatic = -1,
-  Fast = 1,
-  Balanced,
-  Beautiful,
+    Automatic = -1,
+    Fast = 1,
+    Balanced,
+    Beautiful,
 }
 
 export enum EStreamP2PScope {
