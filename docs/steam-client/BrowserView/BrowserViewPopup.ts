@@ -1,5 +1,5 @@
-import {ETouchGesture} from '../Browser';
-import { BrowserView } from '.';
+import { ETouchGesture } from "../Browser";
+import { BrowserView } from ".";
 
 export interface BrowserViewPopup {
     /**
@@ -154,83 +154,76 @@ interface BrowserViewEventMap {
     /**
      * Fires when an `alert()` dialog appears.
      */
-    'alert-dialog': (message: string) => void;
+    "alert-dialog": (message: string) => void;
 
     /**
      * Fires when the browser is about to get destroyed.
      */
-    'before-close': () => void;
+    "before-close": () => void;
 
     /**
      * Fires when a URL gets blocked.
      * @todo not SetBlockedProtocols, maybe only steam links
      */
-    'blocked-request': (blockedURL: string) => void;
+    "blocked-request": (blockedURL: string) => void;
 
     /**
      * Fires when {@link BrowserViewPopup.CanGoBackward} or
      * {@link BrowserViewPopup.CanGoForward} state changes.
      */
-    'can-go-back-forward-changed': (
-        canGoBackward: boolean,
-        canGoForward: boolean,
-    ) => void;
+    "can-go-back-forward-changed": (canGoBackward: boolean, canGoForward: boolean) => void;
 
     /**
      * Fires when a `confirm()` dialog appears.
      */
-    'confirm-dialog': (message: string) => void;
+    "confirm-dialog": (message: string) => void;
 
     /**
      * Fires when the browser's favicon changes.
      */
-    'favicon-urls-changed': (faviconURLs: string[]) => void;
+    "favicon-urls-changed": (faviconURLs: string[]) => void;
 
     /**
      * Fires when 'Find in page' gets its results.
      */
-    'find-in-page-results': (results: number, activeResultIndex: number) => void;
+    "find-in-page-results": (results: number, activeResultIndex: number) => void;
 
     /**
      * Fires when the page finishes loading.
      */
-    'finished-request': (currentURL: string, previousURL: string) => void;
+    "finished-request": (currentURL: string, previousURL: string) => void;
 
     /**
      * Fires when the browser goes focused or vice versa.
      */
-    'focus-changed': (focused: boolean) => void;
+    "focus-changed": (focused: boolean) => void;
 
     /**
      * Fires when the browser goes fullscreen or vice versa.
      */
-    'full-screen': (fullscreen: boolean) => void;
+    "full-screen": (fullscreen: boolean) => void;
 
     /**
      * Fires when history changes occur.
      */
-    'history-changed': (history: BrowserViewHistory) => void;
+    "history-changed": (history: BrowserViewHistory) => void;
 
     /**
      * Fires when the URL fails to load.
      */
-    'load-error': (
-        errorCode: number,
-        errorURL: string,
-        errorDescription: string,
-    ) => void;
+    "load-error": (errorCode: number, errorURL: string, errorDescription: string) => void;
 
     /**
      * Fires when a message gets sent with {@link BrowserView.PostMessageToParent}.
      */
-    'message': (message: string, args: string, currentURL: string) => void;
+    message: (message: string, args: string, currentURL: string) => void;
 
-    'new-tab': (url: string, param1: boolean) => void;
+    "new-tab": (url: string, param1: boolean) => void;
 
     /**
      * Fires when a node gets focused.
      */
-    'node-has-focus': (
+    "node-has-focus": (
         /**
          * Same as {@link Element.tagName}, but the value is the element's ID when exists.
          */
@@ -250,27 +243,27 @@ interface BrowserViewEventMap {
         param4: boolean,
     ) => void;
 
-    'page-security': (url: string, pageSecurity: BrowserViewPageSecurity) => void;
+    "page-security": (url: string, pageSecurity: BrowserViewPageSecurity) => void;
 
     /**
      * Fires when the page's `<title>` changes.
      */
-    'set-title': (title: string) => void;
+    "set-title": (title: string) => void;
 
     /**
      * Fires when the page starts loading.
      */
-    'start-loading': (url: string, param1: boolean) => void;
+    "start-loading": (url: string, param1: boolean) => void;
 
     /**
      * Fires when the page starts loading.
      */
-    'start-request': (url: string) => void;
+    "start-request": (url: string) => void;
 
     /**
      * Fires when "Find in page" gets toggled.
      */
-    'toggle-find-in-page': () => void;
+    "toggle-find-in-page": () => void;
 }
 
 export interface BrowserViewBounds {

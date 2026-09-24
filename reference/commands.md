@@ -51,7 +51,7 @@ remove from both with a single `inject remove`.
 
 `logs` and `watch` never return, so they run **concurrently** instead, with every line tagged:
 
-```
+```text
 [localhost] [LOG  ] MULTIPROBE from desktop
 [steamdeck] [LOG  ] MULTIPROBE from deck
 ```
@@ -127,7 +127,7 @@ position with no value exits 2 rather than falling back to the default.
 
 Preflight gate (SKILL.md R1). Resolves the endpoint, counts targets, and reports readiness.
 
-```
+```text
 CDP endpoint:  http://localhost:8080
 Targets found: 5
 SharedJSContext: SharedJSContext
@@ -146,7 +146,7 @@ Walks the Failure Ladder (SKILL.md §6) automatically and reports the first thin
 Checks run in dependency order — Node version, CDP endpoint, targets, `SharedJSContext`, webpack,
 Steam init, Big Picture window — because everything after a failure would fail for the same reason.
 
-```
+```text
   ✓ Node.js 22+: found 25.9.0
   ✓ CDP endpoint: http://localhost:8080
   ✓ Targets: 5 target(s)
@@ -255,7 +255,7 @@ channels. An invalid pattern is rejected at startup rather than silently matchin
 `--source` picks one channel; the default `all` reads every one. Backend lines are tagged
 `(backend)` so their origin is unambiguous:
 
-```
+```text
 [ERROR] (backend) RaiseJSException: Method call failed: Downloads.EnableAllDownloads requires 2 arguments; only 1 given
 ```
 
@@ -396,7 +396,7 @@ node $S dom '#QuickAccess-Menu' --target QuickAccess
 node $S dom 'body' --depth 4 --target BigPicture
 ```
 
-```
+```text
 div#QuickAccess-Menu.V0cr-SAnDhzAWmPZdrJQJ.Panel  [854x720]
   div._3k5MHjpKaOv6C29MKPgd6x  [348x0] (no size)
   div._1gJzx0OgstpPqW34DFUKC6.Panel  [854x720]
@@ -433,7 +433,7 @@ node $S classes QuickAccessMenu
 node $S classes dialogbutton --ignore-case --limit 5
 ```
 
-```
+```text
 Pattern "QuickAccessMenu" — 4 class name(s):
 
   QuickAccessMenu
@@ -490,7 +490,7 @@ Any `steam://` URL is passed through unchanged. An unrecognised name becomes
 
 Three possible messages:
 
-```
+```text
 Navigated: steam://open/downloads -> /library/downloads                  # moved
 Navigated: steam://open/downloads -> /library/downloads (already there)  # already correct
 Executed: steam://open/account
@@ -590,7 +590,7 @@ node $S inject css theme.css --target BigPicture
 node $S screenshot --target BigPicture --out after.png --diff before.png
 ```
 
-```
+```text
 Changed: 20312 of 4096000 px (0.4959%), bounding box 265x104 at 66,732
 ```
 
@@ -642,7 +642,7 @@ run, so reloads are fast.
 node $S watch css theme.css --target BigPicture
 ```
 
-```
+```text
 [08:37:38] initial: applied
 Watching theme.css -> "theme" in Steam Big Picture Mode. Ctrl+C to stop.
 [08:37:41] changed: applied
@@ -657,7 +657,7 @@ defeat the point. Editors that save by renaming are handled by re-establishing t
 Backend errors and warnings stream alongside the reload messages, so a `SteamClient` call the
 client refuses is attributable to the edit that caused it:
 
-```
+```text
 [08:37:41] changed: applied
 [ERROR] (backend) RaiseJSException: Method call failed: …
 ```

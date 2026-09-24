@@ -19,7 +19,7 @@ node $S logs --level error          # errors from every stream
 
 Every line is tagged, so the stream a message came from is never in doubt:
 
-```
+```text
 [ERROR] Uncaught TypeError: …                  ← console  (page JS)
 [ERROR] (theme.css) Failed to load resource    ← browser  (CEF)
 [ERROR] (backend) RaiseJSException: …          ← backend  (Steam itself)
@@ -56,7 +56,7 @@ SSH, and it works identically on a Steam Deck over `--host`.
 made with the wrong arguments succeeds on the JS side and is rejected in the backend — without
 this stream the symptom is "my code ran and nothing happened":
 
-```
+```text
 [ERROR] (backend) RaiseJSException: Method call failed: Downloads.EnableAllDownloads requires 2 arguments; only 1 given
 ```
 
@@ -103,7 +103,7 @@ node $S logs --level error                       # start here
 node $S status                                   # webpack loaded? init done?
 node $S eval 'document.readyState'
 node $S eval 'typeof window.webpackChunksteamui'
-node $S eval 'window.App?.BFinishedInitStageOne()'
+node $S eval 'window.App?.BFinishedInitBeforeLogin()'
 ```
 
 | Symptom | Cause |
@@ -187,7 +187,7 @@ A crash takes CDP with it, so nothing can be read from the client afterwards —
 evidence is what was already streamed out. That is why `watch` keeps the backend stream open: on a
 dropped connection it prints the last lines it received and exits 1.
 
-```
+```text
 CDP connection dropped — Steam crashed, restarted, or closed.
 
 Last 4 backend line(s) before the drop:

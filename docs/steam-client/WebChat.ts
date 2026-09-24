@@ -1,4 +1,4 @@
-import {OverlayBrowserInfo} from "./Overlay";
+import { OverlayBrowserInfo } from "./Overlay";
 import { EResult, EUIMode, Unregisterable } from "./shared";
 
 export interface WebChat {
@@ -70,9 +70,7 @@ export interface WebChat {
      * @todo Changes to 2 after 10 seconds?
      * @todo Does not affect the keyboard?
      */
-    RegisterForComputerActiveStateChange(
-        callback: (state: EComputerActiveState, time: number) => void,
-    ): Unregisterable;
+    RegisterForComputerActiveStateChange(callback: (state: EComputerActiveState, time: number) => void): Unregisterable;
 
     /**
      * @todo WebChat.ShowFriendChatDialog does this.

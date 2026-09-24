@@ -1,5 +1,5 @@
 import { JsPbMessage, Unregisterable } from "../shared";
-import {EUpdaterState} from "../Updates";
+import { EUpdaterState } from "../Updates";
 
 export interface Dock {
     DisarmSafetyNet(): void;

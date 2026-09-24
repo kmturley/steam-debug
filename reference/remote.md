@@ -71,7 +71,7 @@ These are the differences that matter:
 
 ### Targets
 
-```
+```text
 SharedJSContext           https://steamloopback.host/routes/…   webpack ✓  SteamUIStore ✓
 Steam Big Picture Mode    about:blank?createflags=…             webpack ✗  SteamUIStore ✗
 QuickAccess_uid2          about:blank?browserviewpopup=…        webpack ✗  SteamUIStore ✗
@@ -89,7 +89,7 @@ platform difference, and check `targets` rather than assuming.
 
 On the Deck, a Quick Access Menu that has not been opened this session reports a **height of 1**:
 
-```
+```text
 closed (never opened):  { x: 0, y: 0, width: 854, height: 1 }
 open:                   { x: 0, y: 0, width: 854, height: 454 }
 closed again:           { x: 0, y: 0, width: 854, height: 454 }

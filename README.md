@@ -175,7 +175,7 @@ so captures do not overwrite, and the exit code is 0 only if every device succee
 
 Three streams, not one. `logs` reads all of them and tags each line with where it came from:
 
-```
+```text
 [ERROR] Uncaught TypeError: …                  console — page JavaScript
 [ERROR] (theme.css) Failed to load resource    browser — CEF
 [ERROR] (backend) RaiseJSException: …          backend — Steam itself
@@ -402,7 +402,7 @@ Globals available in `SharedJSContext`:
 
 ```js
 window.webpackChunksteamui          // webpack chunk array — presence means the bundle loaded
-window.App?.BFinishedInitStageOne() // true once Steam has finished initialising
+window.App?.BFinishedInitBeforeLogin() // true once Steam has finished initialising
 window.SteamUIStore                 // MobX state: navigation, menus, windows
 window.SteamClient                  // native client API bridge
 window.g_PopupManager               // popup window registry

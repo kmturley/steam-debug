@@ -197,14 +197,9 @@ export enum EWindowBringToFront {
 }
 
 export type WindowLocation_t =
-    | 'upper-left'
-    | 'lower-left'
-    | 'center-top'
-    | 'center-bottom'
-    | 'upper-right'
-    | 'lower-right';
+    "upper-left" | "lower-left" | "center-top" | "center-bottom" | "upper-right" | "lower-right";
 
-export type WindowIcon_t = 'steam' | 'messages' | 'voice';
+export type WindowIcon_t = "steam" | "messages" | "voice";
 
 /**
  * "Usable" here refers to space that is not taken by the taskbar.

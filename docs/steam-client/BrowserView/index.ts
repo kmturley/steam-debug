@@ -1,5 +1,5 @@
 import { Unregisterable } from "../shared";
-import {BrowserViewPopup} from "./BrowserViewPopup";
+import { BrowserViewPopup } from "./BrowserViewPopup";
 
 export interface BrowserView {
     /**

@@ -165,10 +165,7 @@ export interface ServerBrowser {
      * @param callback The callback function to be called.
      * @returns an object that can be used to unregister the callback.
      */
-    RegisterForPlayerDetails(
-        dialogId: number,
-        callback: (player: PlayerDetails) => void,
-    ): Unregisterable;
+    RegisterForPlayerDetails(dialogId: number, callback: (player: PlayerDetails) => void): Unregisterable;
 
     /**
      * Registers a callback function to be called when a server gets pinged.
@@ -203,9 +200,7 @@ export interface ServerBrowser {
     SetServerListPreferences(prefs: ServerBrowserPreferences): void;
 }
 
-
-
-export type ServerBrowserTab_t = 'internet' | 'favorites' | 'history' | 'lan' | 'friends';
+export type ServerBrowserTab_t = "internet" | "favorites" | "history" | "lan" | "friends";
 
 export interface ServerBrowserGame {
     /** The ID of the game. */
@@ -283,7 +278,7 @@ export interface ServerBrowserDialog {
     queryPort: number;
 }
 
-export interface GameServer  {
+export interface GameServer {
     /** The ID of the game. */
     appid: number;
     /** Do not refresh if had unsuccessful response? */
@@ -350,23 +345,22 @@ export interface PlayerDetails {
 
     /**
      * Player name.
-     * 
+     *
      * @note Defined when {@link bRefreshComplete} is `true`.
      */
     playerName?: string;
 
     /**
      * Player score.
-     * 
+     *
      * @note Defined when {@link bRefreshComplete} is `true`.
      */
     score?: number;
 
     /**
      * Time played on the server in seconds
-     * 
+     *
      * @note Defined when {@link bRefreshComplete} is `true`.
      */
     timePlayed?: number;
 }
-

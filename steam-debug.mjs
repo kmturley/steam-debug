@@ -527,7 +527,7 @@ async function cmdStatus(opts) {
       return {
         hasWebpack: !!chunk,
         moduleCount,
-        steamInit: !!(window.App?.BFinishedInitStageOne?.()),
+        steamInit: !!(window.App?.BFinishedInitBeforeLogin?.()),
         href: location.href,
         // Identifies this incarnation of the JS context. A different value on a later call means
         // the context restarted in between — so injections are gone and state was reset.
@@ -611,7 +611,7 @@ async function cmdDoctor(opts) {
         const chunk = window.webpackChunksteamui;
         return {
           hasWebpack: !!chunk,
-          steamInit: !!(window.App?.BFinishedInitStageOne?.()),
+          steamInit: !!(window.App?.BFinishedInitBeforeLogin?.()),
           hasStore: !!window.SteamUIStore,
           hasGamepadWindow: !!window.SteamUIStore?.m_WindowStore?.GamepadUIMainWindowInstance,
           injections: Object.keys(window.__steam_debug_injections ?? {}),
@@ -1598,7 +1598,7 @@ async function waitForContext(opts, previousStarted, timeoutMs = RESTART_WAIT_MS
           const raw = await evaluate(session, `JSON.stringify({
             started: new Date(performance.timeOrigin).toISOString(),
             hasWebpack: !!window.webpackChunksteamui,
-            steamInit: !!(window.App?.BFinishedInitStageOne?.()),
+            steamInit: !!(window.App?.BFinishedInitBeforeLogin?.()),
           })`);
           const s = JSON.parse(raw);
           if (s.started !== previousStarted && s.hasWebpack && s.steamInit) return s;

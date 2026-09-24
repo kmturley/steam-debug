@@ -1,15 +1,15 @@
 import { JsPbMessage, OperationResponse, Unregisterable } from "../shared";
-import {Audio} from "./Audio";
-import {AudioDevice} from "./AudioDevice";
-import {Bluetooth} from "./Bluetooth";
-import {Devkit} from "./Devkit";
-import {Display} from "./Display";
-import {DisplayManager} from "./DisplayManager";
-import {Dock} from "./Dock";
-import {Network} from "./network";
-import {Perf} from "./Perf";
-import {Report} from "./Report";
-import {UI} from "./UI";
+import { Audio } from "./Audio";
+import { AudioDevice } from "./AudioDevice";
+import { Bluetooth } from "./Bluetooth";
+import { Devkit } from "./Devkit";
+import { Display } from "./Display";
+import { DisplayManager } from "./DisplayManager";
+import { Dock } from "./Dock";
+import { Network } from "./Network";
+import { Perf } from "./Perf";
+import { Report } from "./Report";
+import { UI } from "./UI";
 
 export interface System {
     Audio: Audio;
@@ -151,9 +151,9 @@ export interface BatteryState {
 }
 
 export interface FormatStorageProgress {
-  flProgress: number;
-  rtEstimatedCompletionTime: number;
-  eStage: EStorageFormatStage;
+    flProgress: number;
+    rtEstimatedCompletionTime: number;
+    eStage: EStorageFormatStage;
 }
 
 export enum EACState {
@@ -171,13 +171,13 @@ export enum EBatteryState {
 }
 
 export enum EStorageFormatStage {
-  Invalid,
-  NotRunning,
-  Starting,
-  Testing,
-  Rescuing,
-  Formatting,
-  Finalizing,
+    Invalid,
+    NotRunning,
+    Starting,
+    Testing,
+    Rescuing,
+    Formatting,
+    Finalizing,
 }
 
 export interface FileDialog {

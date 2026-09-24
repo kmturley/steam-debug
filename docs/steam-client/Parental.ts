@@ -27,13 +27,13 @@ export interface Parental {
 }
 
 export interface ParentalSettings {
-  ever_enabled: boolean;
-  locked: boolean;
-  /**
-   * If deserialized, returns {@link ParentalSettingsProtoMsg}.
-   */
-  settings: ArrayBuffer;
-  strPlaintextPassword: string;
+    ever_enabled: boolean;
+    locked: boolean;
+    /**
+     * If deserialized, returns {@link ParentalSettingsProtoMsg}.
+     */
+    settings: ArrayBuffer;
+    strPlaintextPassword: string;
 }
 
 /**
@@ -90,40 +90,40 @@ export interface ParentalSettingsProtoMsg {
 }
 
 interface ParentalApp {
-  appid: number;
-  is_allowed: boolean;
+    appid: number;
+    is_allowed: boolean;
 }
 
 interface ParentalPlaytimeDay {
-  allowed_time_windows?: number;
-  allowed_daily_minutes?: number;
+    allowed_time_windows?: number;
+    allowed_daily_minutes?: number;
 }
 
 interface ParentalPlaytimeRestrictions {
-  apply_playtime_restrictions?: boolean;
-  playtime_days: ParentalPlaytimeDay[];
+    apply_playtime_restrictions?: boolean;
+    playtime_days: ParentalPlaytimeDay[];
 }
 
 interface ParentalTemporaryPlaytimeRestrictions {
-  restrictions?: ParentalPlaytimeDay;
-  rtime_expires?: number;
+    restrictions?: ParentalPlaytimeDay;
+    rtime_expires?: number;
 }
 
 export enum EParentalFeature {
-  Invalid,
-  Store,
-  Community,
-  Profile,
-  Friends,
-  News,
-  Trading,
-  Settings,
-  Console,
-  Browser,
-  ParentalSetup,
-  Library,
-  Test,
-  SiteLicense,
-  KioskMode,
-  Max,
+    Invalid,
+    Store,
+    Community,
+    Profile,
+    Friends,
+    News,
+    Trading,
+    Settings,
+    Console,
+    Browser,
+    ParentalSetup,
+    Library,
+    Test,
+    SiteLicense,
+    KioskMode,
+    Max,
 }

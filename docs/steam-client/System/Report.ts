@@ -23,7 +23,7 @@ export interface Report {
 export interface SystemReportReply extends OperationResponse {
     /**
      * If deserialized, returns {@link CMsgGenerateSystemReportReply}.
-     * 
+     *
      * Optional, since {@link Report.GenerateSystemReport} throws without this.
      */
     reply?: ArrayBuffer;
