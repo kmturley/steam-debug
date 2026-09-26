@@ -74,9 +74,9 @@ command, flag, subcommand, or alias, and never infer one from a pattern. If a ta
 something outside that surface, say so explicitly and fall back to `eval`.
 
 **R3 — Target discipline.** `--target` is accepted only by `eval`, `errors`, `logs`, `styles`,
-`dom`, `module`, `screenshot`, `inject`, and `watch`. Every other command always runs against the
-shared JS context and rejects `--target` outright. Never state or imply that a result came from a
-window the command cannot reach.
+`dom`, `text`, `module`, `screenshot`, `inject`, and `watch`. Every other command always runs
+against the shared JS context and rejects `--target` outright. Never state or imply that a result
+came from a window the command cannot reach.
 
 **R4 — Read the exit code *and* the payload.** 0 means the data you asked for was produced; 1
 means the command failed or found nothing; 2 means the invocation was wrong. An empty result is
@@ -157,6 +157,9 @@ Sensible defaults. Override when the task calls for it, and say why.
 - Narrow `webpack` searches before widening them. Try an exact pattern first, then
   `--ignore-case`, then a shorter substring.
 - Answer CSS questions with `styles` rather than a hand-written `eval` of `getComputedStyle`.
+- Answer "what does it say" with `text` rather than a `screenshot`. It costs one Runtime.evaluate
+  round trip instead of a PNG capture, encode, and vision pass — reach for `screenshot` only when
+  the question is actually about layout, color, or a canvas/WebGL surface `text` cannot see.
 - Use the CLI for scripted or repeatable checks; point the user at Chrome DevTools
   (`chrome://inspect`) for open-ended visual exploration.
 - Keep `-gamepadui` set when working on Big Picture / Steam Deck-style UI; omit it when the
@@ -174,6 +177,7 @@ Sensible defaults. Override when the task calls for it, and say why.
 | "Make my change load on startup / persist" | **Out of scope** — say so; that is the plugin loader's job |
 | "What class name do I target?" | `classes <ReadableName>`, then `styles` to confirm |
 | "What does this part of the UI look like structurally?" | `dom <selector> --target <win>` |
+| "What does the screen/a panel say right now?" | `text [selector] --target <win>` — cheaper than `screenshot` when the question is about text, not layout or color |
 | "Find the component / module for X" | Phase 2 → `webpack`, `module` |
 | "Something is broken / erroring" | Phase 2 → `logs`, `errors` → `reference/troubleshooting.md` |
 | "My code runs but nothing happens" | `logs --source backend` (R11) → `reference/troubleshooting.md` |
@@ -183,6 +187,7 @@ Sensible defaults. Override when the task calls for it, and say why.
 | "Inspect the Quick Access Menu / Main Menu" | `reference/targets.md` |
 | "What state does Steam hold?" | `stores`, `page`, `popups` |
 | "Debug my Steam Deck" | `reference/remote.md` |
+| "Is Decky / a plugin installed or running?" | `reference/decky-plugins.md` |
 
 ---
 
@@ -204,6 +209,7 @@ This table is the single source of truth. It is verified against the implementat
 | `react` | — | rejected | JSON | 1 — React not found |
 | `styles` | `<selector>` | **yes** | JSON | 1 — selector matched nothing |
 | `dom` | `<selector>` | **yes** | tree, or JSON | 1 — selector matched nothing |
+| `text` | `[selector]` | **yes** | human text, or JSON | 1 — selector matched nothing, or nothing visible had text |
 | `webpack` | `<pattern>` | rejected | human text | 1 — no matches |
 | `classes` | `<pattern>` | rejected | human text | 1 — no matches |
 | `module` | `<id>` | **yes** | raw module source | 1 — module not found |
@@ -236,7 +242,7 @@ client is its job. Branch on its `ready` field. `doctor` is the opposite: it exi
 anything is wrong, and names the remedy. `status` also reports `contextStarted` — a different
 value between two calls means the UI restarted in between, so every injection is gone.
 
-**Every `--json` payload names the window it came from.** `eval`, `styles`, `dom`, `module`,
+**Every `--json` payload names the window it came from.** `eval`, `styles`, `dom`, `text`, `module`,
 `errors`, `console`, `screenshot`, and `inject` all carry a `target` field holding the title of
 the window that actually answered. Quote that field rather than the `--target` you passed — they
 differ whenever a name resolved to something other than what you meant (R3, R7).
@@ -512,6 +518,7 @@ Load on demand; do not read them all up front.
 | `reference/injection.md` | Writing CSS/JS into Steam; CEF paint traps; plugin patterns |
 | `reference/troubleshooting.md` | Log sources, error-pattern tables, React error decoding, crash recovery |
 | `reference/steam-client-api.md` | Calling a `SteamClient` API the CLI does not wrap; index into `docs/steam-client/` |
+| `reference/decky-plugins.md` | Checking whether Decky Loader / a specific plugin is installed and loaded; what is and is not reachable about one from CDP |
 | `reference/remote.md` | Steam Deck / SteamOS over the network |
 | `reference/launch-options.md` | **Rarely.** Only when changing how Steam is launched, or hunting a capability the CLI lacks. Phase 0's four flags cover normal work |
 

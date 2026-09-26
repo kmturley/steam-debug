@@ -115,6 +115,7 @@ node $S help
 | `react` | React version, module ID, fiber tree stats |
 | `styles <selector>` | Computed styles, layout rect, resolved CSS custom properties |
 | `dom <selector>` | Dump an element subtree — structure, sizes, leaf text |
+| `text [selector]` | Dump the visible on-screen text — cheap alternative to a screenshot |
 | `webpack <pattern>` | Search every webpack module's source |
 | `classes <pattern>` | Resolve minified CSS-module class names by readable name |
 | `module <id>` | Dump a webpack module's full source |
@@ -130,7 +131,7 @@ node $S help
 
 | Option | Applies to | Default |
 |---|---|---|
-| `--target <name>` | `eval`, `errors`, `logs`, `styles`, `dom`, `module`, `screenshot`, `inject`, `watch` | `SharedJSContext` |
+| `--target <name>` | `eval`, `errors`, `logs`, `styles`, `dom`, `text`, `module`, `screenshot`, `inject`, `watch` | `SharedJSContext` |
 | `--port <n>` | all | tries 8080, 8081, then 9222 |
 | `--host <addr>` | all | `localhost` — comma-separate for several devices |
 | `--timeout <ms>` | all | `10000` |
@@ -138,7 +139,7 @@ node $S help
 | `--level <all\|warn\|error>` | `logs` | `all` |
 | `--source <all\|console\|browser\|backend>` | `logs` | `all` |
 | `--grep <regex>` | `logs` | — |
-| `--limit <n>` | `webpack`, `classes`, `console list` | `10` / `20` |
+| `--limit <n>` | `webpack`, `classes`, `console list`, `text` | `10` / `20` / `500` |
 | `--ignore-case` | `webpack`, `classes`, `console list` | off |
 | `--depth <n>` | `dom` | `2` |
 | `--out <path>` | `screenshot` | derived from target title |
@@ -295,6 +296,30 @@ composited outside the page tree and CDP capture hangs on them.
 
 The usual cause is Steam's `.BasicUI` layer covering anything painted on `body` — style the leaf
 element that owns the pixels instead.
+
+---
+
+## Reading what's on screen, without a screenshot
+
+`screenshot` answers "did the pixels change"; `text` answers "what does it say" — for a fraction
+of the cost. It walks the DOM instead of capturing and decoding an image, so there is no PNG to
+encode, no vision-model pass, and no risk of a misread character: every string it returns came
+straight out of an HTML text node that is actually laid out on screen.
+
+```bash
+node $S text                                    # everything visible under <body>
+node $S text ".gamelist" --limit 100            # scope to one container
+node $S text --target BigPicture --json         # machine-readable, with the target field
+```
+
+Visibility is judged by layout (a zero-size or `display: none`/`visibility: hidden` element
+contributes nothing), not by OCR confidence, so a hidden tooltip or an off-screen menu never shows
+up as "on screen" the way a screenshot crop might mislead you into believing. Each element's own
+direct text is reported once, not once per ancestor, so a page with deeply nested wrappers does
+not repeat itself.
+
+Reach for `screenshot` instead when the question is about layout, color, or something drawn to a
+`<canvas>`/WebGL surface — `text` only sees real DOM text nodes.
 
 ---
 
