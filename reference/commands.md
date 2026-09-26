@@ -408,6 +408,39 @@ usually the reason an element "exists" but cannot be seen or styled. Depth defau
 children beyond it are counted rather than expanded. `data-*`, `role` and `aria-label` attributes
 are included since they make more durable selectors than minified classes.
 
+## `text [selector]`
+
+Dumps the visible text on screen — every element's own direct text, in DOM order, skipping
+anything with no rendered size. The cheap alternative to `screenshot` when the question is "what
+does it say" rather than "what does it look like": one `Runtime.evaluate` round trip, no PNG
+capture, no encode/decode, no vision-model pass, and no risk of a misread character, since the
+text comes straight out of an HTML text node rather than being inferred from pixels.
+
+```bash
+node $S text                              # everything visible under <body>, default target
+node $S text '.gamelist' --limit 100      # scope to one container, raise the cap
+node $S text --target BigPicture --json   # machine-readable
+```
+
+```text
+div: Search for games or profiles...
+button[filter]: All Games
+div: Some Game Title
+div: Another Game Title
+```
+
+Selector defaults to `body`. Visibility is judged the same way `dom` marks `(no size)` — a zero-
+width or zero-height layout rect — which also catches `display: none`/`visibility: hidden` as a
+side effect, without walking computed style for each node. `aria-hidden="true"` is excluded
+explicitly since it does not always zero the rect. Each element's OWN text is reported once, not
+once per ancestor, so deeply nested wrappers around the same string do not repeat it. `--limit`
+(default 500) caps the result and the JSON payload's `truncated` field says whether it was hit.
+
+Exits 1 when the selector matches nothing, or when nothing visible under it has any text.
+
+Reach for `screenshot` instead when the question is about layout, color, or a canvas/WebGL
+surface — `text` only sees real DOM text nodes, so it cannot read anything drawn to a canvas.
+
 ## `webpack <pattern>`
 
 Substring search across every module's source. Always `SharedJSContext`; `--target` rejected.

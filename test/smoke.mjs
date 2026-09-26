@@ -1051,6 +1051,48 @@ describe('dom', () => {
   });
 });
 
+describe('text', () => {
+  // QuickAccess is a popup whose layout does not exist until the menu has been shown at least
+  // once (reference/targets.md) — open it here rather than relying on an earlier describe block
+  // to have left it open, which breaks the moment this file is run with a name filter.
+  before(async () => { await menuAndWait('QuickAccess', 'QuickAccess'); });
+
+  test('dumps visible text under the default root', async () => {
+    const { stdout } = await run('text', '--target', 'QuickAccess');
+    assert.ok(stdout.trim().length > 0, 'expected at least one line of visible text');
+  });
+
+  test('scopes to a selector', async () => {
+    const result = await runJson('text', '#QuickAccess-Menu', '--target', 'QuickAccess', '--json');
+    assert.ok(result.count >= 0);
+    assert.ok(Array.isArray(result.items));
+  });
+
+  test('every item has non-empty text and no duplicates', async () => {
+    const result = await runJson('text', '--target', 'QuickAccess', '--json');
+    const strings = result.items.map(i => i.text);
+    assert.ok(strings.every(s => s.length > 0), 'every item should have non-empty text');
+    assert.equal(new Set(strings).size, strings.length, 'items should be deduplicated');
+  });
+
+  test('--limit caps the result', async () => {
+    const result = await runJson('text', 'body', '--target', 'QuickAccess', '--limit', '1', '--json');
+    assert.ok(result.count <= 1);
+  });
+
+  test('a missing selector exits 1', async () => {
+    const { code } = await runExpectingFailure(
+      'text', '.no-such-element-xyz', '--target', 'QuickAccess');
+    assert.equal(code, 1);
+  });
+
+  test('carries a target field under --json', async () => {
+    const result = await runJson('text', '--target', 'QuickAccess', '--json');
+    // The resolved title, not necessarily the alias passed in — e.g. "QuickAccess_uid2" (R7).
+    assert.match(result.target, /QuickAccess/);
+  });
+});
+
 describe('classes', () => {
   test('resolves a readable name to the class actually in the DOM', async () => {
     const { stdout: live } = await run(
@@ -1381,8 +1423,17 @@ describe('credential redaction', () => {
 });
 
 describe('results name the window that answered', () => {
-  test('eval, styles and dom all carry a target field', async () => {
-    for (const args of [['eval', '1 + 1'], ['styles', 'body'], ['dom', 'body', '--depth', '0']]) {
+  // text's success case needs an element with actual text content — SharedJSContext's own
+  // <body> is nearly empty (the visible library UI lives under Steam Big Picture Mode; see
+  // reference/targets.md), so text would legitimately exit 1 there and break runJson below.
+  // QuickAccess has real text once shown once.
+  before(async () => { await menuAndWait('QuickAccess', 'QuickAccess'); });
+
+  test('eval, styles, dom and text all carry a target field', async () => {
+    for (const args of [
+      ['eval', '1 + 1'], ['styles', 'body'], ['dom', 'body', '--depth', '0'],
+      ['text', 'body', '--target', 'QuickAccess'],
+    ]) {
       const result = await runJson(...args, '--json');
       assert.equal(typeof result.target, 'string',
         `${args[0]} must report which window answered (R3, R7)`);

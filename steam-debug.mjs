@@ -1000,6 +1000,95 @@ async function cmdDom(selector, opts) {
 }
 
 /**
+ * Dump the visible text on screen — the cheap alternative to a screenshot for "what does this
+ * say", "did the label update", or a quick read of a list/grid, without an image's tokens or a
+ * decode step.
+ *
+ * Reads text straight from the DOM rather than OCR-ing a rendered image: every one of these
+ * elements is already visible HTML in a CEF page, so the text is there to read, not to infer.
+ * That also makes it exact — no misread character — and it costs one Runtime.evaluate round trip
+ * instead of a screenshot capture, PNG encode/decode and vision-model pass. It cannot see text
+ * baked into a canvas or WebGL surface (rare in Steam's UI); reach for `screenshot` there instead.
+ *
+ * Visibility is judged by layout, not by walking computed style: an element with a zero-size
+ * rect, or one positioned entirely outside the viewport, contributes nothing, which is cheap to
+ * check per node and catches `display: none`/`visibility: hidden` as a side effect (both collapse
+ * the rect). `aria-hidden="true"` is excluded explicitly since it does not necessarily zero the
+ * rect. Only an element's OWN direct text (not its descendants') is collected, walking the full
+ * tree instead — the same text under a wrapper would otherwise be reported once per ancestor.
+ */
+async function cmdText(selector, opts) {
+  const root = selector || 'body';
+  const limit = opts.limit ?? 500;
+
+  await withSession(opts, async (session, target) => {
+    const raw = await evaluate(session, `JSON.stringify((() => {
+      const root = document.querySelector(${JSON.stringify(root)});
+      if (!root) return { error: 'No element matches: ' + ${JSON.stringify(root)} };
+
+      const lim = ${JSON.stringify(limit)};
+      const isVisible = (el) => {
+        const r = el.getBoundingClientRect();
+        return r.width > 0 && r.height > 0;
+      };
+
+      // Direct (non-descendant) text of one element: its own text-node children, joined and
+      // collapsed. Walking every element and reading only THIS layer avoids the same string
+      // being reported again for every ancestor up to <body>.
+      const ownText = (el) => {
+        let s = '';
+        for (const n of el.childNodes) {
+          if (n.nodeType === Node.TEXT_NODE) s += n.textContent;
+        }
+        return s.replace(/\\s+/g, ' ').trim();
+      };
+
+      const items = [];
+      const seen = new Set();
+      const skipTags = new Set(['script', 'style', 'noscript', 'svg', 'path']);
+      const walk = (el) => {
+        if (items.length >= lim) return;
+        if (skipTags.has(el.tagName.toLowerCase())) return;
+        if (el.getAttribute('aria-hidden') === 'true') return;
+
+        // Visibility gates whether THIS element's own text counts, not whether its children
+        // are worth visiting — a zero-size or scaled-to-nothing wrapper can still contain a
+        // normally-laid-out child (observed on SharedJSContext's own <body>, which reports a
+        // ~1x1 rect while the page it hosts renders normally beneath it). Returning early here
+        // would silently walk nothing at all below the very first invisible ancestor.
+        if (isVisible(el)) {
+          const t = ownText(el);
+          if (t && !seen.has(t)) {
+            seen.add(t);
+            items.push({
+              text: t,
+              tag: el.tagName.toLowerCase(),
+              role: el.getAttribute('role') || el.getAttribute('aria-label') || undefined,
+            });
+          }
+        }
+        for (const c of el.children) walk(c);
+      };
+      walk(root);
+
+      return { count: items.length, truncated: items.length >= lim, items };
+    })())`);
+
+    const result = JSON.parse(raw);
+    if (result.error) { printJson({ target: target.title, ...result }); process.exitCode = EXIT_FAIL; return; }
+    if (result.count === 0) { printJson({ target: target.title, ...result }); process.exitCode = EXIT_FAIL; return; }
+
+    emit(opts, { target: target.title, ...result }, () => {
+      for (const item of result.items) {
+        const tag = item.role ? `${item.tag}[${item.role}]` : item.tag;
+        console.log(`${tag}: ${item.text}`);
+      }
+      if (result.truncated) console.log(`\n… truncated at ${limit} items (--limit to raise)`);
+    });
+  });
+}
+
+/**
  * Resolve Steam's minified CSS-module class names.
  *
  * CSS modules compile to objects of the form `ReadableName:"minifiedHash"` in the bundle, so the
@@ -2360,6 +2449,7 @@ Commands:
   react                           Detect React in Steam's webpack bundle
   styles <selector> [--target t]  Computed styles + layout rect for a CSS selector
   dom <selector> [--depth N]      Dump an element subtree (structure, sizes, text)
+  text [selector] [--limit N]     Dump visible on-screen text — cheap alternative to a screenshot
   webpack <pattern>               Search webpack modules [--limit N] [--ignore-case]
   classes <pattern>               Resolve minified CSS-module class names by readable name
   navigate <page>                 Navigate BPM to a page (home, settings, downloads…)
@@ -2395,7 +2485,7 @@ Options:
                     Steam from a terminal, and the only one that names the Steam
                     component behind a failed call.
   --grep <regex>    Only show log lines matching this pattern
-  --limit <n>       Max results for 'webpack' and 'classes' (positive integer)
+  --limit <n>       Max results for 'webpack', 'classes' and 'text' (positive integer)
   --ignore-case     Case-insensitive search for 'webpack' and 'classes'
   --depth <n>       Subtree depth for 'dom' (default: 2)
   --out <path>      Output file for 'screenshot'
@@ -2581,6 +2671,7 @@ const COMMANDS = {
   react:      { targetAware: false, flags: [],                     run: (rest, opts) => cmdReact(opts) },
   styles:     { targetAware: true,  flags: [],                     run: (rest, opts) => cmdStyles(rest[0], opts) },
   dom:        { targetAware: true,  flags: ['depth'],              run: (rest, opts) => cmdDom(rest[0], opts) },
+  text:       { targetAware: true,  flags: ['limit'],               run: (rest, opts) => cmdText(rest[0], opts) },
   webpack:    { targetAware: false, flags: ['limit', 'ignore-case'], run: (rest, opts) => cmdWebpack(rest[0], opts) },
   classes:    { targetAware: false, flags: ['limit', 'ignore-case'], run: (rest, opts) => cmdClasses(rest[0], opts) },
   navigate:   { targetAware: false, flags: [],                     run: (rest, opts) => cmdNavigate(rest[0], opts) },
